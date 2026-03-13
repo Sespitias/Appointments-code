@@ -1,0 +1,28 @@
+tebra:
+  wsdl: "https://webservice.kareo.com/services/soap/2.1/KareoServices.svc?singleWsdl"
+  user: "${TEBRA_USER}"
+  password: "${TEBRA_PASSWORD}"
+  customer_key: "${TEBRA_CUSTOMER_KEY}"
+
+bigquery:
+  project_id: "${GCP_PROJECT_ID}"
+  dataset_id: "${BQ_DATASET_ID}"
+  source_table: "appointment_update"
+  target_table: "appointment_prod"
+
+google_sheets:
+  sheet_key: "${SHEET_KEY}"
+  patient_sheet_key: "${PATIENT_SHEET_KEY}"
+  insurance_sheet_key: "${INSURANCE_SHEET_KEY}"
+
+pipeline:
+  months_back: 1
+  months_forward: 12
+  fetch_interval_days: 8
+  parallel_workers: 10
+  async_upload: true
+  chunk_size: 500
+
+execution:
+  type: 2  # 0: normal, 1: recurrente, 2: ambas
+  days_back_filter: 10
