@@ -1,7 +1,9 @@
 import pandas as pd
-from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class TebraClient:
@@ -37,7 +39,8 @@ class TebraClient:
         
         appointments = []
         try:
-            for apt in response.Appointments.AppointmentData:
+            appointment_data = getattr(getattr(response, 'Appointments', None), 'AppointmentData', [])
+            for apt in appointment_data:
                 appointments.append({
                     'ID': apt.ID,
                     'ConfirmationStatus': apt.ConfirmationStatus,
@@ -55,7 +58,8 @@ class TebraClient:
                     'Provider': apt.ResourceName1,
                 })
         except Exception as e:
-            print(f"Error fetching {date}: {e}")
+            logger.exception("Error parsing Tebra appointments for %s: %s", date, e)
+            raise
         return appointments
 
     def fetch_appointments_parallel(
@@ -79,11 +83,12 @@ class TebraClient:
                     all_appointments.extend(appointments)
                     completed += 1
                     if completed % 20 == 0:
-                        print(f"Procesadas {completed}/{len(dates)} fechas")
+                        logger.info("Procesadas %s/%s fechas", completed, len(dates))
                 except Exception as e:
-                    print(f"Error en fecha {date}: {e}")
+                    logger.exception("Error extrayendo fecha %s: %s", date, e)
+                    raise
         
-        print(f"Total registros extraídos: {len(all_appointments)}")
+        logger.info("Total registros extraídos: %s", len(all_appointments))
         return pd.DataFrame(all_appointments)
 
     def fetch_appointments_sequential(self, dates: list) -> pd.DataFrame:
@@ -92,6 +97,6 @@ class TebraClient:
             appointments = self._fetch_single_date(date)
             all_appointments.extend(appointments)
             if (i + 1) % 20 == 0:
-                print(f"Procesadas {i + 1}/{len(dates)} fechas")
-        print(f"Total registros extraídos: {len(all_appointments)}")
+                logger.info("Procesadas %s/%s fechas", i + 1, len(dates))
+        logger.info("Total registros extraídos: %s", len(all_appointments))
         return pd.DataFrame(all_appointments)

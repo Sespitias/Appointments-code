@@ -16,3 +16,8 @@ htmlcov/
 *.swp
 *.swo
 *~
+appointment_frecuently_new_modificada.py
+.vscode/
+credentials.json
+credentials*.json
+service-account*.json

@@ -116,6 +116,23 @@ class Config:
             for field in fields:
                 if not self._config.get(section, {}).get(field):
                     errors.append(f"Missing config: {section}.{field}")
+
+        service_account_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+        oauth_fields = ['CLIENT_ID', 'CLIENT_SECRET', 'REFRESH_TOKEN']
+        oauth_values = {field: os.getenv(field) for field in oauth_fields}
+
+        if service_account_path:
+            if not Path(service_account_path).exists():
+                errors.append(
+                    f"GOOGLE_APPLICATION_CREDENTIALS points to a missing file: {service_account_path}"
+                )
+        else:
+            missing_oauth = [field for field, value in oauth_values.items() if not value]
+            if missing_oauth:
+                errors.append(
+                    "Missing Google auth configuration. Set GOOGLE_APPLICATION_CREDENTIALS "
+                    f"or provide: {', '.join(missing_oauth)}"
+                )
         
         return errors
 

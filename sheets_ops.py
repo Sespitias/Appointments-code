@@ -1,9 +1,14 @@
-import pandas as pd
-import gspread
-from gspread_dataframe import set_with_dataframe
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 import time
 from typing import Optional
+
+import gspread
+import pandas as pd
+from gspread_dataframe import set_with_dataframe
+from gspread.utils import rowcol_to_a1
+
+
+logger = logging.getLogger(__name__)
 
 
 class SheetsClient:
@@ -16,7 +21,7 @@ class SheetsClient:
                 return self.gc.open_by_key(key)
             except Exception as e:
                 if attempt < retries - 1:
-                    print(f"Retry {attempt + 1}/{retries} for spreadsheet {key}")
+                    logger.warning("Retry %s/%s for spreadsheet %s", attempt + 1, retries, key)
                     time.sleep(delay)
                 else:
                     raise
@@ -44,8 +49,10 @@ class SheetsClient:
         try:
             sheet = self._resolve_worksheet(spreadsheet, sheet_identifier)
         except Exception as e:
-            print(f"Worksheet not found: {e}")
+            logger.exception("Worksheet not found: %s", e)
             return False
+
+        self._ensure_sheet_size(sheet, len(df), len(df.columns), row, col, include_header)
         
         if clear_sheet:
             sheet.clear()
@@ -53,13 +60,138 @@ class SheetsClient:
         if async_mode and len(df) > chunk_size:
             return self._import_async(sheet, df, chunk_size, max_retries, delay, row, col, include_header, resize)
         return self._import_sync(sheet, df, max_retries, delay, row, col, include_header, resize)
+
+    def upsert_dataframe(
+        self,
+        spreadsheet,
+        df: pd.DataFrame,
+        sheet_identifier,
+        key_column: str = "ID",
+        max_retries: int = 3,
+        delay: int = 30,
+    ) -> bool:
+        try:
+            sheet = self._resolve_worksheet(spreadsheet, sheet_identifier)
+        except Exception as e:
+            logger.exception("Worksheet not found: %s", e)
+            return False
+
+        if df.empty:
+            self._sync_header(sheet, df.columns.tolist())
+            logger.info("No delta rows to upsert into Google Sheets")
+            return True
+
+        self._sync_header(sheet, df.columns.tolist())
+        existing_df = self._get_existing_data_with_rows(sheet)
+
+        if key_column not in existing_df.columns:
+            existing_df = pd.DataFrame(columns=df.columns.tolist() + ["__row_num__"])
+
+        if key_column not in df.columns:
+            raise KeyError(f"Missing key column for upsert: {key_column}")
+
+        prepared_df = self._prepare_sheet_dataframe(df)
+        existing_lookup = {}
+        if not existing_df.empty:
+            for _, row in existing_df.iterrows():
+                existing_lookup[str(row[key_column])] = int(row["__row_num__"])
+
+        rows_to_update = []
+        rows_to_append = []
+        for _, row in prepared_df.iterrows():
+            row_key = str(row[key_column])
+            row_values = row[df.columns.tolist()].tolist()
+            row_num = existing_lookup.get(row_key)
+            if row_num is None:
+                rows_to_append.append(row_values)
+            else:
+                rows_to_update.append((row_num, row_values))
+
+        required_rows = max(sheet.row_count, 1 + len(existing_df) + len(rows_to_append))
+        required_cols = max(sheet.col_count, len(df.columns))
+        if required_rows != sheet.row_count or required_cols != sheet.col_count:
+            sheet.resize(rows=required_rows, cols=required_cols)
+
+        for row_num, row_values in rows_to_update:
+            self._update_row(sheet, row_num, row_values, max_retries, delay)
+
+        if rows_to_append:
+            self._append_rows(sheet, rows_to_append, max_retries, delay)
+
+        logger.info(
+            "Upserted %s rows into Google Sheets (%s updates, %s inserts)",
+            len(prepared_df),
+            len(rows_to_update),
+            len(rows_to_append),
+        )
+        return True
     
     def _resolve_worksheet(self, spreadsheet, identifier):
         try:
             return spreadsheet.get_worksheet_by_id(int(identifier))
         except (ValueError, gspread.WorksheetNotFound):
             return spreadsheet.worksheet(identifier)
+
+    def _sync_header(self, sheet, columns: list[str]) -> None:
+        header_values = [columns]
+        required_cols = max(sheet.col_count, len(columns), 1)
+        if sheet.col_count != required_cols:
+            sheet.resize(rows=max(sheet.row_count, 1), cols=required_cols)
+        end_cell = rowcol_to_a1(1, len(columns))
+        sheet.update(f"A1:{end_cell}", header_values)
+
+    def _get_existing_data_with_rows(self, sheet) -> pd.DataFrame:
+        all_values = sheet.get_all_values()
+        if not all_values:
+            return pd.DataFrame(columns=["__row_num__"])
+
+        header = all_values[0]
+        data = all_values[1:]
+        if not data:
+            return pd.DataFrame(columns=header + ["__row_num__"])
+
+        df = pd.DataFrame(data, columns=header)
+        df["__row_num__"] = pd.RangeIndex(2, 2 + len(df))
+        return df
+
+    def _prepare_sheet_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        prepared = df.copy()
+        prepared = prepared.where(~prepared.isna(), "")
+        return prepared.astype(str).reset_index(drop=True)
+
+    def _update_row(self, sheet, row_num: int, row_values: list[str], max_retries: int, delay: int) -> None:
+        range_name = f"A{row_num}:{rowcol_to_a1(row_num, len(row_values))}"
+        for attempt in range(max_retries):
+            try:
+                sheet.update(range_name, [row_values])
+                return
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                else:
+                    raise
+
+    def _append_rows(self, sheet, rows: list[list[str]], max_retries: int, delay: int) -> None:
+        for attempt in range(max_retries):
+            try:
+                sheet.append_rows(rows, value_input_option="USER_ENTERED")
+                return
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                else:
+                    raise
     
+    def _ensure_sheet_size(self, sheet, data_rows, data_cols, start_row, start_col, include_header):
+        required_rows = start_row + data_rows - 1 + (1 if include_header else 0)
+        required_cols = start_col + data_cols - 1
+
+        target_rows = max(required_rows, 1)
+        target_cols = max(required_cols, 1)
+
+        if target_rows != sheet.row_count or target_cols != sheet.col_count:
+            sheet.resize(rows=target_rows, cols=target_cols)
+
     def _import_sync(self, sheet, df, max_retries, delay, row, col, include_header, resize):
         for attempt in range(max_retries):
             try:
@@ -68,11 +200,11 @@ class SheetsClient:
                     include_column_header=include_header,
                     resize=resize
                 )
-                print(f"Imported {len(df)} rows successfully")
+                logger.info("Imported %s rows successfully", len(df))
                 return True
             except Exception as e:
                 if attempt < max_retries - 1:
-                    print(f"Retry {attempt + 1}: {e}")
+                    logger.warning("Retry %s importing dataframe: %s", attempt + 1, e)
                     time.sleep(delay)
                 else:
                     raise
@@ -80,25 +212,18 @@ class SheetsClient:
     
     def _import_async(self, sheet, df, chunk_size, max_retries, delay, row, col, include_header, resize):
         total_rows = len(df)
-        tasks = []
-        
-        with ThreadPoolExecutor() as executor:
-            for start in range(0, total_rows, chunk_size):
-                end = min(start + chunk_size, total_rows)
-                fragment = df.iloc[start:end]
-                start_row = row + start + (1 if include_header and start == 0 else 0)
-                header_flag = include_header and start == 0
-                tasks.append(executor.submit(
-                    self._import_fragment, sheet, fragment, start_row, header_flag, 
-                    max_retries, delay, resize
-                ))
-            
-            for future in as_completed(tasks):
-                try:
-                    future.result()
-                except Exception as e:
-                    print(f"Chunk error: {e}")
-                    return False
+        for start in range(0, total_rows, chunk_size):
+            end = min(start + chunk_size, total_rows)
+            fragment = df.iloc[start:end]
+            start_row = row if start == 0 else row + start + (1 if include_header else 0)
+            header_flag = include_header and start == 0
+            try:
+                self._import_fragment(
+                    sheet, fragment, start_row, header_flag, max_retries, delay, False
+                )
+            except Exception as e:
+                logger.exception("Chunk error while importing dataframe: %s", e)
+                return False
         return True
     
     def _import_fragment(self, sheet, df, start_row, header_flag, max_retries, delay, resize):
@@ -129,7 +254,7 @@ class SheetsClient:
         try:
             worksheet = self._resolve_worksheet(spreadsheet, sheet_identifier)
         except Exception as e:
-            print(f"Worksheet not found: {e}")
+            logger.exception("Worksheet not found: %s", e)
             return False
         
         google_cols = worksheet.row_values(1)
@@ -157,7 +282,7 @@ class SheetsClient:
                     if attempt < max_retries - 1:
                         time.sleep(retry_delay)
                     else:
-                        print(f"Failed to update {col_name}: {e}")
+                        logger.exception("Failed to update %s: %s", col_name, e)
                         return False
         return True
 

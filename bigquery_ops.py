@@ -1,55 +1,132 @@
+import logging
+import re
+from typing import Literal
+
 import pandas as pd
 import pandas_gbq
+from google.api_core.exceptions import Forbidden, GoogleAPIError, NotFound
 from google.cloud import bigquery
-from google.api_core.exceptions import GoogleAPIError
-from typing import Literal
 
 
 BQ_COLUMNS = [
-    'ID', 'ConfirmationStatus', 'CreatedDate', 'LastModifiedDate',
-    'ServiceLocationName', 'PatientID', 'PatientFullName', 'PatientCaseID',
-    'PatientCaseName', 'PatientCasePayerScenario', 'StartDate', 'EndDate',
-    'AppointmentReason1', 'Provider', 'Service', 'Done', 'StartOnlyDate',
-    'WeekDate', 'MonthDate', 'Month', 'Week', 'Time', 'CreationWeekDate', 'CaseNameID'
+    "ID",
+    "ConfirmationStatus",
+    "CreatedDate",
+    "LastModifiedDate",
+    "ServiceLocationName",
+    "PatientID",
+    "PatientFullName",
+    "PatientCaseID",
+    "PatientCaseName",
+    "PatientCasePayerScenario",
+    "StartDate",
+    "EndDate",
+    "AppointmentReason1",
+    "Provider",
+    "Service",
+    "Done",
+    "StartOnlyDate",
+    "WeekDate",
+    "MonthDate",
+    "Month",
+    "Week",
+    "Time",
+    "CreationWeekDate",
+    "CaseNameID",
 ]
 
 CONVERSION_MAPPING = {
-    'ID': str,
-    'ConfirmationStatus': str,
-    'CreatedDate': lambda x: pd.to_datetime(x, errors='coerce', utc=True),
-    'LastModifiedDate': lambda x: pd.to_datetime(x, errors='coerce', utc=True),
-    'ServiceLocationName': str,
-    'PatientID': str,
-    'PatientFullName': str,
-    'PatientCaseID': str,
-    'PatientCaseName': str,
-    'PatientCasePayerScenario': str,
-    'StartDate': lambda x: pd.to_datetime(x, errors='coerce', utc=True),
-    'EndDate': lambda x: pd.to_datetime(x, errors='coerce', utc=True),
-    'AppointmentReason1': str,
-    'Provider': str,
-    'Service': str,
-    'Done': lambda x: pd.to_numeric(x, errors='coerce', downcast='integer'),
-    'StartOnlyDate': lambda x: pd.to_datetime(x, errors='coerce').dt.date,
-    'WeekDate': str,
-    'MonthDate': str,
-    'Month': lambda x: pd.to_numeric(x, errors='coerce', downcast='integer'),
-    'Week': lambda x: pd.to_numeric(x, errors='coerce', downcast='integer'),
-    'Time': lambda x: pd.to_numeric(x, errors='coerce'),
-    'CreationWeekDate': str,
-    'CaseNameID': str
+    "ID": str,
+    "ConfirmationStatus": str,
+    "CreatedDate": lambda x: pd.to_datetime(x, errors="coerce", utc=True),
+    "LastModifiedDate": lambda x: pd.to_datetime(x, errors="coerce", utc=True),
+    "ServiceLocationName": str,
+    "PatientID": str,
+    "PatientFullName": str,
+    "PatientCaseID": str,
+    "PatientCaseName": str,
+    "PatientCasePayerScenario": str,
+    "StartDate": lambda x: pd.to_datetime(x, errors="coerce", utc=True),
+    "EndDate": lambda x: pd.to_datetime(x, errors="coerce", utc=True),
+    "AppointmentReason1": str,
+    "Provider": str,
+    "Service": str,
+    "Done": lambda x: pd.to_numeric(x, errors="coerce", downcast="integer"),
+    "StartOnlyDate": lambda x: pd.to_datetime(x, errors="coerce").dt.date,
+    "WeekDate": str,
+    "MonthDate": str,
+    "Month": lambda x: pd.to_numeric(x, errors="coerce", downcast="integer"),
+    "Week": lambda x: pd.to_numeric(x, errors="coerce", downcast="integer"),
+    "Time": lambda x: pd.to_numeric(x, errors="coerce"),
+    "CreationWeekDate": str,
+    "CaseNameID": str,
 }
+
+logger = logging.getLogger(__name__)
+_BQ_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def _validate_identifier(value: str, label: str) -> str:
+    if not value or not _BQ_IDENTIFIER_RE.fullmatch(value):
+        raise ValueError(f"Invalid BigQuery {label}: {value!r}")
+    return value
+
+
+def validate_bigquery_destination(
+    client: bigquery.Client,
+    project_id: str,
+    dataset_id: str,
+    table_name: str,
+) -> str:
+    _validate_identifier(dataset_id, "dataset_id")
+    _validate_identifier(table_name, "table_name")
+
+    dataset_ref = f"{project_id}.{dataset_id}"
+    table_ref = f"{dataset_ref}.{table_name}"
+
+    try:
+        client.get_dataset(dataset_ref)
+    except Forbidden as exc:
+        raise PermissionError(
+            f"Forbidden: missing access to dataset {dataset_ref}"
+        ) from exc
+    except NotFound as exc:
+        raise FileNotFoundError(
+            f"BigQuery dataset not found: {dataset_ref}"
+        ) from exc
+
+    try:
+        client.get_table(table_ref)
+    except Forbidden as exc:
+        raise PermissionError(
+            f"Forbidden: missing access to table {table_ref}"
+        ) from exc
+    except NotFound as exc:
+        raise FileNotFoundError(
+            f"BigQuery table not found: {table_ref}"
+        ) from exc
+
+    return table_ref
 
 
 def load_to_bigquery(
-    project_id: str, 
-    dataset_id: str, 
-    table_name: str, 
-    df: pd.DataFrame, 
-    if_exists: Literal['fail', 'replace', 'append']
+    project_id: str,
+    dataset_id: str,
+    table_name: str,
+    df: pd.DataFrame,
+    if_exists: Literal["fail", "replace", "append"],
+    credentials,
 ) -> None:
+    _validate_identifier(dataset_id, "dataset_id")
+    _validate_identifier(table_name, "table_name")
     table_ref = f"{dataset_id}.{table_name}"
-    pandas_gbq.to_gbq(df, table_ref, project_id=project_id, if_exists=if_exists)
+    pandas_gbq.to_gbq(
+        df,
+        table_ref,
+        project_id=project_id,
+        if_exists=if_exists,
+        credentials=credentials,
+    )
 
 
 def convert_columns(df: pd.DataFrame, mapping: dict = CONVERSION_MAPPING) -> pd.DataFrame:
@@ -61,19 +138,23 @@ def convert_columns(df: pd.DataFrame, mapping: dict = CONVERSION_MAPPING) -> pd.
                     result[col] = conversion(result[col])
                 else:
                     result[col] = result[col].astype(conversion)
-            except Exception as e:
-                print(f"Error converting column '{col}': {e}")
+            except Exception as exc:
+                raise ValueError(f"Error converting column '{col}': {exc}") from exc
     return result
 
 
 def filter_recent_appointments(df: pd.DataFrame, days_back: int = 10) -> pd.DataFrame:
-    df['LastModifiedDate'] = pd.to_datetime(df['LastModifiedDate'], format='mixed', utc=True)
-    today = pd.Timestamp.today(tz='UTC')
+    if "LastModifiedDate" not in df.columns:
+        raise KeyError("Missing required column: LastModifiedDate")
+
+    df = df.copy()
+    df["LastModifiedDate"] = pd.to_datetime(df["LastModifiedDate"], format="mixed", utc=True)
+    today = pd.Timestamp.today(tz="UTC")
     return df[
-        df['LastModifiedDate'].between(
-            today.floor('D') - pd.Timedelta(days=days_back),
-            today.ceil('D'),
-            inclusive='both'
+        df["LastModifiedDate"].between(
+            today.floor("D") - pd.Timedelta(days=days_back),
+            today.ceil("D"),
+            inclusive="both",
         )
     ]
 
@@ -82,17 +163,25 @@ def merge_appointments(
     project_id: str,
     dataset_id: str,
     source_table: str,
-    target_table: str
+    target_table: str,
+    client: bigquery.Client,
 ) -> bool:
+    _validate_identifier(dataset_id, "dataset_id")
+    _validate_identifier(source_table, "source_table")
+    _validate_identifier(target_table, "target_table")
+
     query = f"""
     MERGE INTO `{dataset_id}.{target_table}` AS target
     USING (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY ID ORDER BY StartDate DESC) AS rn
-        FROM `{dataset_id}.{source_table}`
+        SELECT * EXCEPT(rn)
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY ID ORDER BY LastModifiedDate DESC, StartDate DESC) AS rn
+            FROM `{dataset_id}.{source_table}`
+        )
+        WHERE rn = 1
     ) AS source
     ON target.ID = source.ID
     WHEN MATCHED AND (
-        -- Optimized: use MD5 hash instead of comparing each field
         MD5(CONCAT(
             COALESCE(CAST(source.ConfirmationStatus AS STRING), ''),
             COALESCE(CAST(source.CreatedDate AS STRING), ''),
@@ -174,15 +263,15 @@ def merge_appointments(
         source.CaseNameID
     )
     """
-    
+
     try:
-        with bigquery.Client(project=project_id, location="us") as client:
-            job = client.query(query)
-            job.result()
-            print("BigQuery merge completed")
-            return True
-    except GoogleAPIError as e:
-        print(f"BigQuery error: {e}")
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-    return False
+        job = client.query(query, project=project_id)
+        job.result()
+        logger.info("BigQuery merge completed")
+        return True
+    except GoogleAPIError as exc:
+        logger.exception("BigQuery error during merge: %s", exc)
+        raise
+    except Exception as exc:
+        logger.exception("Unexpected error during BigQuery merge: %s", exc)
+        raise
