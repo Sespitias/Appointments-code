@@ -1,0 +1,360 @@
+{
+  "dataset_name": "appointments",
+  "description": "Esquema objetivo para normalizar los datos de citas y garantizar formato consistente por columna.",
+  "columns": [
+    {
+      "name": "ID",
+      "target_type": "string",
+      "source_type_inference": "object",
+      "description": "Identificador único de la cita.",
+      "example_values": ["220871", "220872"],
+      "rules": [
+        "Conservar como texto.",
+        "No convertir a entero aunque tenga apariencia numérica.",
+        "Preservar valores exactamente como llegan."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "ConfirmationStatus",
+      "target_type": "string",
+      "source_type_inference": "object",
+      "description": "Estado actual de confirmación o realización de la cita.",
+      "example_values": ["Scheduled", "Check-Out"],
+      "rules": [
+        "Conservar como texto categórico.",
+        "Normalizar espacios laterales.",
+        "Mantener capitalización original o definir catálogo estándar si ya existe en el pipeline."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "CreatedDate",
+      "target_type": "datetime",
+      "source_type_inference": "datetime64[ns]",
+      "description": "Momento exacto en que se creó el registro de la cita.",
+      "example_values": ["2026-03-17 06:12:06"],
+      "rules": [
+        "Convertir explícitamente a datetime.",
+        "Validar nulos y formatos inválidos.",
+        "Mantener zona horaria definida por el pipeline si aplica."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "LastModifiedDate",
+      "target_type": "datetime",
+      "source_type_inference": "object",
+      "description": "Momento de la última modificación del registro.",
+      "example_values": ["2026-03-17 06:12:06"],
+      "rules": [
+        "Convertir de texto a datetime.",
+        "Manejar errores de parseo.",
+        "Permitir nulos si el origen no siempre trae valor."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "ServiceLocationName",
+      "target_type": "string",
+      "source_type_inference": "object",
+      "description": "Nombre de la clínica o ubicación donde se presta el servicio.",
+      "example_values": ["TeleMind Clinic-San Antonio"],
+      "rules": [
+        "Conservar como texto.",
+        "Aplicar trim.",
+        "No modificar semántica del nombre."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "PatientID",
+      "target_type": "integer",
+      "source_type_inference": "int64",
+      "description": "Identificador único del paciente.",
+      "example_values": [17829],
+      "rules": [
+        "Convertir a entero.",
+        "Si existen nulos, usar tipo entero nullable según tecnología destino."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "PatientFullName",
+      "target_type": "string",
+      "source_type_inference": "object",
+      "description": "Nombre completo del paciente.",
+      "example_values": ["Juan Camacho", "Jennifer Westbrook"],
+      "rules": [
+        "Conservar como texto.",
+        "Aplicar trim.",
+        "No forzar uppercase/lowercase salvo requerimiento explícito."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "PatientCaseID",
+      "target_type": "integer_nullable",
+      "source_type_inference": "float64",
+      "description": "Identificador único del caso o póliza del paciente.",
+      "example_values": [22433],
+      "rules": [
+        "Eliminar parte decimal artificial si viene como float representando enteros.",
+        "Permitir nulos.",
+        "Convertir a entero nullable."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "PatientCaseName",
+      "target_type": "string",
+      "source_type_inference": "object",
+      "description": "Nombre completo del caso, seguro o pagador del paciente.",
+      "example_values": ["Tricare West", "Blue Cross Blue Shield Of Texas"],
+      "rules": [
+        "Conservar como texto.",
+        "Aplicar trim.",
+        "No colapsar categorías salvo mapeo oficial."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "PatientCasePayerScenario",
+      "target_type": "string",
+      "source_type_inference": "object",
+      "description": "Escenario o tipo de pagador del caso.",
+      "example_values": ["Commercial"],
+      "rules": [
+        "Conservar como categórico.",
+        "Aplicar trim."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "StartDate",
+      "target_type": "datetime",
+      "source_type_inference": "datetime64[ns]",
+      "description": "Fecha y hora programada de inicio de la cita.",
+      "example_values": ["2026-03-18 12:15:00"],
+      "rules": [
+        "Convertir explícitamente a datetime.",
+        "Este campo es base para columnas derivadas."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "EndDate",
+      "target_type": "datetime",
+      "source_type_inference": "datetime64[ns]",
+      "description": "Fecha y hora programada de finalización de la cita.",
+      "example_values": ["2026-03-18 12:30:00"],
+      "rules": [
+        "Convertir explícitamente a datetime.",
+        "Validar que EndDate sea mayor o igual a StartDate cuando aplique."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "AppointmentReason1",
+      "target_type": "string",
+      "source_type_inference": "object",
+      "description": "Razón principal de la cita.",
+      "example_values": ["Followup Televisit", "Cognitive Test"],
+      "rules": [
+        "Conservar como texto categórico.",
+        "Aplicar trim."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "Provider",
+      "target_type": "string",
+      "source_type_inference": "object",
+      "description": "Nombre del proveedor o profesional que atiende la cita.",
+      "example_values": ["Jessica Johnson"],
+      "rules": [
+        "Conservar como texto categórico.",
+        "Aplicar trim."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "Service",
+      "target_type": "string",
+      "source_type_inference": "object",
+      "description": "Categoría general del servicio.",
+      "example_values": ["Follow up", "Cognitive"],
+      "rules": [
+        "Conservar como texto categórico.",
+        "Aplicar trim."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "Done",
+      "target_type": "integer",
+      "source_type_inference": "int64",
+      "description": "Indicador binario de si la cita fue completada.",
+      "example_values": [1, 0],
+      "rules": [
+        "Crear a partir de ConfirmationStatus.",
+        "Asignar 1 cuando ConfirmationStatus represente cita completada.",
+        "Asignar 0 en los demás casos.",
+        "Definir explícitamente qué estados cuentan como completados; mínimo incluir Check-Out."
+      ],
+      "derived": true,
+      "source_columns": ["ConfirmationStatus"]
+    },
+    {
+      "name": "StartOnlyDate",
+      "target_type": "date",
+      "source_type_inference": "object",
+      "description": "Parte de fecha de StartDate sin componente de hora.",
+      "example_values": ["2026-03-18"],
+      "rules": [
+        "Crear a partir de StartDate.",
+        "Extraer únicamente la fecha.",
+        "Guardar como date real, no como string si la tecnología lo permite."
+      ],
+      "derived": true,
+      "source_columns": ["StartDate"]
+    },
+    {
+      "name": "WeekDate",
+      "target_type": "string",
+      "source_type_inference": "object",
+      "description": "Rango de semana de la cita calculado desde StartDate, usando semanas de viernes a jueves.",
+      "example_values": ["03/13-03/19/26"],
+      "rules": [
+        "Crear a partir de StartDate.",
+        "La semana debe comenzar en viernes y terminar en jueves.",
+        "Formatear como MM/DD-MM/DD/YY.",
+        "Usar la fecha de StartDate para ubicar la semana correspondiente."
+      ],
+      "derived": true,
+      "source_columns": ["StartDate"]
+    },
+    {
+      "name": "MonthDate",
+      "target_type": "date",
+      "source_type_inference": "object",
+      "description": "Fecha representativa del mes de la cita.",
+      "example_values": ["2026-03-26"],
+      "rules": [
+        "Convertir a date si ya existe.",
+        "Si se recalcula, definir con exactitud la lógica de negocio porque el ejemplo no parece ser primer día de mes ni último día del mes."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "Month",
+      "target_type": "integer",
+      "source_type_inference": "int64",
+      "description": "Número del mes.",
+      "example_values": [3, 4],
+      "rules": [
+        "Conservar o recalcular desde StartDate si se busca consistencia.",
+        "Valores válidos entre 1 y 12."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "Week",
+      "target_type": "integer",
+      "source_type_inference": "int64",
+      "description": "Número de semana según calendario interno del sistema.",
+      "example_values": [168, 172],
+      "rules": [
+        "Conservar si el origen ya define la lógica.",
+        "Si se recalcula, documentar exactamente el calendario base porque no parece ser ISO estándar."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "Time",
+      "target_type": "float",
+      "source_type_inference": "float64",
+      "description": "Duración de la cita en horas.",
+      "example_values": [0.25, 0.75],
+      "rules": [
+        "Conservar como número decimal.",
+        "Validar consistencia contra StartDate y EndDate cuando sea posible."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "CreationWeekDate",
+      "target_type": "string",
+      "source_type_inference": "object",
+      "description": "Rango de semana de creación de la cita.",
+      "example_values": ["03/19-03/24/26"],
+      "rules": [
+        "Conservar si ya existe.",
+        "Idealmente recalcular desde CreatedDate con la misma lógica semanal usada en WeekDate si se requiere consistencia."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "CaseNameID",
+      "target_type": "string",
+      "source_type_inference": "object",
+      "description": "Versión abreviada o ID legible del pagador o caso.",
+      "example_values": ["Tricare West", "Bcbs Tx"],
+      "rules": [
+        "Conservar como texto.",
+        "Aplicar trim.",
+        "No asumir que es un ID numérico."
+      ],
+      "derived": false,
+      "source_columns": []
+    },
+    {
+      "name": "1",
+      "target_type": "string_nullable",
+      "source_type_inference": "object",
+      "description": "Columna no identificada con mayoría de valores nulos.",
+      "example_values": [null],
+      "rules": [
+        "Inspeccionar antes de conservar.",
+        "Si no tiene utilidad funcional, marcar para eliminación.",
+        "No usar en lógica de negocio hasta aclarar propósito."
+      ],
+      "derived": false,
+      "source_columns": []
+    }
+  ],
+  "derived_columns_logic": {
+    "Done": {
+      "depends_on": ["ConfirmationStatus"],
+      "logic": "1 si ConfirmationStatus indica cita completada; 0 en caso contrario. Como mínimo, Check-Out debe mapear a 1."
+    },
+    "StartOnlyDate": {
+      "depends_on": ["StartDate"],
+      "logic": "Extraer la porción de fecha de StartDate."
+    },
+    "WeekDate": {
+      "depends_on": ["StartDate"],
+      "logic": "Calcular la semana de StartDate usando semanas Friday-Thursday y devolver rango con formato MM/DD-MM/DD/YY."
+    }
+  }
+}

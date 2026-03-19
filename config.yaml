@@ -7,8 +7,8 @@ tebra:
 bigquery:
   project_id: "${GCP_PROJECT_ID}"
   dataset_id: "${BQ_DATASET_ID}"
-  source_table: "appointment_update"
-  target_table: "appointment_prod"
+  source_table: "appointment_update_copy"
+  target_table: "appointment_prod_copy"
 
 google_sheets:
   sheet_key: "${SHEET_KEY}"

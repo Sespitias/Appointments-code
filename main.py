@@ -263,17 +263,33 @@ class AppointmentPipeline:
             if col not in existing_df.columns:
                 existing_df[col] = None
 
-        processed_norm = self._normalize_for_delta(processed_df).set_index("ID", drop=False)
-        existing_norm = self._normalize_for_delta(existing_df).set_index("ID", drop=False)
+        processed_norm = self._normalize_for_delta(processed_df)   # str, no index yet
+        existing_norm = self._normalize_for_delta(existing_df)
 
-        delta_ids = []
-        for appointment_id, row in processed_norm.iterrows():
-            if appointment_id not in existing_norm.index:
-                delta_ids.append(appointment_id)
-                continue
+        # Hash every row into a single integer for fast comparison.
+        processed_norm["_hash"] = pd.util.hash_pandas_object(
+            processed_norm.drop(columns=["ID"]), index=False
+        )
+        existing_norm["_hash"] = pd.util.hash_pandas_object(
+            existing_norm.drop(columns=["ID"]), index=False
+        )
 
-            if not row.equals(existing_norm.loc[appointment_id]):
-                delta_ids.append(appointment_id)
+        # Keep one row per ID (last wins, consistent with the rest of the pipeline).
+        processed_dedup = processed_norm.drop_duplicates(subset=["ID"], keep="last")
+        existing_dedup = existing_norm.drop_duplicates(subset=["ID"], keep="last")
+
+        merged = processed_dedup[["ID", "_hash"]].merge(
+            existing_dedup[["ID", "_hash"]].rename(columns={"_hash": "_hash_existing"}),
+            on="ID",
+            how="left",
+        )
+
+        # A row is in the delta when it is new (no match) or its hash changed.
+        changed_mask = (
+            merged["_hash_existing"].isna()
+            | (merged["_hash"] != merged["_hash_existing"])
+        )
+        delta_ids = merged.loc[changed_mask, "ID"].tolist()
 
         if not delta_ids:
             return processed_df.iloc[0:0].copy()

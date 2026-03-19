@@ -16,10 +16,18 @@ from bigquery_ops import (
 from main import AppointmentPipeline
 from sheets_ops import SheetsClient
 from transformations import (
+    apply_column_done,
     apply_column_service,
+    apply_column_week_date,
+    apply_column_creation_week_date,
+    apply_time_column,
     assign_patient_case_name,
+    format_column_date,
     normalize_identifier_columns,
+    trim_string_columns,
+    validate_output_schema,
 )
+from column_registry import build_done_map
 
 
 class AppointmentPipelineTests(unittest.TestCase):
@@ -28,8 +36,8 @@ class AppointmentPipelineTests(unittest.TestCase):
             bigquery={
                 "project_id": "weekly-revenue-integration",
                 "dataset_id": "Telemind_BD",
-                "source_table": "appointment_update",
-                "target_table": "appointment_prod",
+                "source_table": "appointment_update_copy",
+                "target_table": "appointment_prod_copy",
             },
             google_sheets={
                 "sheet_key": "sheet",
@@ -168,12 +176,12 @@ class AppointmentPipelineTests(unittest.TestCase):
                 "Service": ["", "Legacy"],
                 "Done": [0, 1],
                 "StartOnlyDate": ["2024-01-03", "2024-01-06"],
-                "WeekDate": ["1-2024", "1-2024"],
-                "MonthDate": ["January 2024", "January 2024"],
+                "WeekDate": ["12/29-01/04/24", "01/05-01/11/24"],
+                "MonthDate": ["2024-01-01", "2024-01-01"],
                 "Month": [1, 1],
                 "Week": [1, 1],
                 "Time": [0.0, 1.0],
-                "CreationWeekDate": ["1-2024", "1-2024"],
+                "CreationWeekDate": ["12/29-01/04/24", "01/05-01/11/24"],
             }
         )
 
@@ -210,12 +218,12 @@ class AppointmentPipelineTests(unittest.TestCase):
                     "Service": "Consult",
                     "Done": 0,
                     "StartOnlyDate": "03/10/2026",
-                    "WeekDate": "11-2026",
-                    "MonthDate": "March 2026",
+                    "WeekDate": "03/06-03/12/26",
+                    "MonthDate": "2026-03-01",
                     "Month": 3,
                     "Week": 11,
                     "Time": 0.75,
-                    "CreationWeekDate": "10-2026",
+                    "CreationWeekDate": "02/27-03/05/26",
                     "CaseNameID": "100",
                 },
                 {
@@ -236,12 +244,12 @@ class AppointmentPipelineTests(unittest.TestCase):
                     "Service": "Deleted Service",
                     "Done": 0,
                     "StartOnlyDate": "03/11/2026",
-                    "WeekDate": "11-2026",
-                    "MonthDate": "March 2026",
+                    "WeekDate": "03/06-03/12/26",
+                    "MonthDate": "2026-03-01",
                     "Month": 3,
                     "Week": 11,
                     "Time": 0.75,
-                    "CreationWeekDate": "10-2026",
+                    "CreationWeekDate": "02/27-03/05/26",
                     "CaseNameID": "999",
                 },
             ],
@@ -275,12 +283,12 @@ class AppointmentPipelineTests(unittest.TestCase):
                     "Service": "Consult",
                     "Done": 0,
                     "StartOnlyDate": "03/10/2026",
-                    "WeekDate": "11-2026",
-                    "MonthDate": "March 2026",
+                    "WeekDate": "03/06-03/12/26",
+                    "MonthDate": "2026-03-01",
                     "Month": 3,
                     "Week": 11,
                     "Time": 0.75,
-                    "CreationWeekDate": "10-2026",
+                    "CreationWeekDate": "02/27-03/05/26",
                     "CaseNameID": "100",
                 }
             ],
@@ -392,6 +400,133 @@ class TransformationTests(unittest.TestCase):
         self.assertEqual(result["PatientID"].tolist(), ["15011", "21369", None])
         self.assertEqual(result["CaseNameID"].tolist(), ["100", "200", None])
 
+    # --- WeekDate (Friday-to-Thursday) tests ---
+
+    def test_week_date_friday_to_thursday_basic(self):
+        """A Monday should fall within the Fri-Thu range that started the previous Friday."""
+        # Monday 2026-03-16 → week is Fri 03/13 to Thu 03/19
+        df = pd.DataFrame({"StartDate": ["2026-03-16 10:00:00"]})
+        result = apply_column_week_date(df)
+        self.assertEqual(result.loc[0, "WeekDate"], "03/13-03/19/26")
+
+    def test_week_date_on_friday(self):
+        """A Friday should start its own week."""
+        # Friday 2026-03-13
+        df = pd.DataFrame({"StartDate": ["2026-03-13 10:00:00"]})
+        result = apply_column_week_date(df)
+        self.assertEqual(result.loc[0, "WeekDate"], "03/13-03/19/26")
+
+    def test_week_date_on_thursday(self):
+        """A Thursday should be the last day of its week."""
+        # Thursday 2026-03-19
+        df = pd.DataFrame({"StartDate": ["2026-03-19 10:00:00"]})
+        result = apply_column_week_date(df)
+        self.assertEqual(result.loc[0, "WeekDate"], "03/13-03/19/26")
+
+    def test_week_date_cross_month(self):
+        """Week that crosses from March into April."""
+        # Monday 2026-03-30 → week is Fri 03/27 to Thu 04/02
+        df = pd.DataFrame({"StartDate": ["2026-03-30 10:00:00"]})
+        result = apply_column_week_date(df)
+        self.assertEqual(result.loc[0, "WeekDate"], "03/27-04/02/26")
+
+    def test_week_date_cross_year(self):
+        """Week that crosses from December into January."""
+        # Monday 2025-12-29 → week is Fri 12/26 to Thu 01/01
+        df = pd.DataFrame({"StartDate": ["2025-12-29 10:00:00"]})
+        result = apply_column_week_date(df)
+        self.assertEqual(result.loc[0, "WeekDate"], "12/26-01/01/26")
+
+    def test_week_date_null_start_date(self):
+        """Null StartDate should produce null WeekDate."""
+        df = pd.DataFrame({"StartDate": [None]})
+        result = apply_column_week_date(df)
+        self.assertIsNone(result.loc[0, "WeekDate"])
+
+    # --- Done tests ---
+
+    def test_done_check_out_maps_to_1_without_master(self):
+        """Check-Out should map to Done=1 using only the local catalog."""
+        df = pd.DataFrame({"ConfirmationStatus": ["Check-Out", "Scheduled"]})
+        result = apply_column_done(df, master_df=None)
+        self.assertEqual(result["Done"].tolist(), [1, 0])
+
+    def test_done_unknown_status_maps_to_0(self):
+        """An unknown status should default to Done=0."""
+        df = pd.DataFrame({"ConfirmationStatus": ["SomeNewStatus"]})
+        result = apply_column_done(df, master_df=None)
+        self.assertEqual(result.loc[0, "Done"], 0)
+
+    def test_done_master_overrides_local(self):
+        """Master sheet mappings should override the local catalog."""
+        master_df = pd.DataFrame(
+            {"ConfirmationStatus": ["Check-Out", "Completed"], "Done": [1, 1]}
+        )
+        df = pd.DataFrame({"ConfirmationStatus": ["Completed", "Cancelled"]})
+        result = apply_column_done(df, master_df=master_df)
+        self.assertEqual(result["Done"].tolist(), [1, 0])
+
+    # --- StartOnlyDate ---
+
+    def test_start_only_date_is_real_date(self):
+        """StartOnlyDate should be a Timestamp with time=00:00:00."""
+        df = pd.DataFrame({"StartDate": ["2026-03-18 14:30:00"]})
+        result = format_column_date(df)
+        val = result.loc[0, "StartOnlyDate"]
+        self.assertIsInstance(val, pd.Timestamp)
+        self.assertEqual(val.hour, 0)
+        self.assertEqual(val.minute, 0)
+        self.assertEqual(val.date(), pd.Timestamp("2026-03-18").date())
+
+    # --- CreationWeekDate ---
+
+    def test_creation_week_date_uses_created_date(self):
+        """CreationWeekDate should derive from CreatedDate, not StartDate."""
+        df = pd.DataFrame({
+            "StartDate": ["2026-03-18 10:00:00"],
+            "CreatedDate": ["2026-03-10 10:00:00"],  # Mon → Fri 03/06 – Thu 03/12
+        })
+        result = apply_column_creation_week_date(df)
+        self.assertEqual(result.loc[0, "CreationWeekDate"], "03/06-03/12/26")
+
+    # --- Time ---
+
+    def test_time_negative_clamped_to_zero(self):
+        """When EndDate < StartDate, Time should be clamped to 0."""
+        df = pd.DataFrame({
+            "StartDate": ["2026-03-18 10:00:00"],
+            "EndDate": ["2026-03-18 09:00:00"],  # -1 hour
+            "Done": [1],
+        })
+        result = apply_time_column(df)
+        self.assertEqual(result.loc[0, "Time"], 0.0)
+
+    # --- trim_string_columns ---
+
+    def test_trim_string_columns(self):
+        """Leading/trailing spaces should be stripped."""
+        df = pd.DataFrame({
+            "ConfirmationStatus": ["  Check-Out  "],
+            "ServiceLocationName": ["  Clinic A "],
+        })
+        result = trim_string_columns(df)
+        self.assertEqual(result.loc[0, "ConfirmationStatus"], "Check-Out")
+        self.assertEqual(result.loc[0, "ServiceLocationName"], "Clinic A")
+
+    # --- validate_output_schema ---
+
+    def test_validate_output_schema_catches_violations(self):
+        """Validator should detect Done outside {0,1} and negative Time."""
+        df = pd.DataFrame({
+            "Done": [2],
+            "Month": [13],
+            "Time": [-1.0],
+            "WeekDate": ["bad-format"],
+            "StartDate": ["2026-03-18 10:00:00"],
+        })
+        warnings = validate_output_schema(df)
+        self.assertTrue(len(warnings) >= 3)  # Done, Month, WeekDate at minimum
+
 
 class BigQueryOpsTests(unittest.TestCase):
     def test_filter_recent_appointments_requires_last_modified_date(self):
@@ -481,15 +616,17 @@ class SheetsClientTests(unittest.TestCase):
             ]
         )
 
-        with patch.object(client, "_update_row") as mock_update_row, patch.object(
+        with patch.object(client, "_batch_update_rows") as mock_batch_update, patch.object(
             client, "_append_rows"
         ) as mock_append_rows:
             result = client.upsert_dataframe(spreadsheet, df, "Appointment")
 
         self.assertTrue(result)
-        mock_update_row.assert_called_once()
-        self.assertEqual(mock_update_row.call_args.args[1], 2)
-        self.assertEqual(mock_update_row.call_args.args[2], ["1", "Updated"])
+        mock_batch_update.assert_called_once()
+        updates_arg = mock_batch_update.call_args.args[1]
+        self.assertEqual(len(updates_arg), 1)
+        self.assertEqual(updates_arg[0][0], 2)                # row number
+        self.assertEqual(updates_arg[0][1], ["1", "Updated"]) # values
         mock_append_rows.assert_called_once_with(sheet, [["2", "New"]], 3, 30)
 
     def test_validate_bigquery_destination_reports_forbidden_table(self):

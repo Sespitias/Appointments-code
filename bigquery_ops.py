@@ -244,7 +244,7 @@ def merge_appointments(
         Provider = source.Provider,
         Service = source.Service,
         Done = source.Done,
-        StartOnlyDate = source.StartOnlyDate,
+        StartOnlyDate = DATE(source.StartOnlyDate),
         WeekDate = source.WeekDate,
         MonthDate = source.MonthDate,
         Month = source.Month,
@@ -258,7 +258,7 @@ def merge_appointments(
         source.ID, source.ConfirmationStatus, source.CreatedDate, source.LastModifiedDate,
         source.ServiceLocationName, source.PatientID, source.PatientFullName, source.PatientCaseID,
         source.PatientCaseName, source.PatientCasePayerScenario, source.StartDate, source.EndDate,
-        source.AppointmentReason1, source.Provider, source.Service, source.Done, source.StartOnlyDate,
+        source.AppointmentReason1, source.Provider, source.Service, source.Done, DATE(source.StartOnlyDate),
         source.WeekDate, source.MonthDate, source.Month, source.Week, source.Time, source.CreationWeekDate,
         source.CaseNameID
     )

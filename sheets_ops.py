@@ -112,8 +112,8 @@ class SheetsClient:
         if required_rows != sheet.row_count or required_cols != sheet.col_count:
             sheet.resize(rows=required_rows, cols=required_cols)
 
-        for row_num, row_values in rows_to_update:
-            self._update_row(sheet, row_num, row_values, max_retries, delay)
+        if rows_to_update:
+            self._batch_update_rows(sheet, rows_to_update, max_retries, delay)
 
         if rows_to_append:
             self._append_rows(sheet, rows_to_append, max_retries, delay)
@@ -159,7 +159,53 @@ class SheetsClient:
         prepared = prepared.where(~prepared.isna(), "")
         return prepared.astype(str).reset_index(drop=True)
 
+    def _batch_update_rows(
+        self,
+        sheet,
+        updates: list[tuple[int, list[str]]],
+        max_retries: int,
+        delay: int,
+        chunk_size: int = 200,
+    ) -> None:
+        """Send all row updates in batched API calls to avoid 429 quota errors.
+
+        Builds A1-notation ranges for every row and sends them in groups of
+        ``chunk_size`` via a single ``values_batch_update`` call per group.
+        """
+        # Build the list of {range, values} dicts for the Sheets API.
+        data = [
+            {
+                "range": f"A{row_num}:{rowcol_to_a1(row_num, len(row_values))}",
+                "values": [row_values],
+            }
+            for row_num, row_values in updates
+        ]
+
+        for chunk_start in range(0, len(data), chunk_size):
+            chunk = data[chunk_start : chunk_start + chunk_size]
+            for attempt in range(max_retries):
+                try:
+                    sheet.spreadsheet.values_batch_update(
+                        {
+                            "valueInputOption": "USER_ENTERED",
+                            "data": chunk,
+                        }
+                    )
+                    break
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            "Batch update retry %s/%s: %s", attempt + 1, max_retries, e
+                        )
+                        time.sleep(delay)
+                    else:
+                        raise
+            # Brief pause between chunks to respect per-minute write quota.
+            if chunk_start + chunk_size < len(data):
+                time.sleep(2)
+
     def _update_row(self, sheet, row_num: int, row_values: list[str], max_retries: int, delay: int) -> None:
+        """Single-row update (kept for backward compatibility / unit tests)."""
         range_name = f"A{row_num}:{rowcol_to_a1(row_num, len(row_values))}"
         for attempt in range(max_retries):
             try:
@@ -171,16 +217,25 @@ class SheetsClient:
                 else:
                     raise
 
-    def _append_rows(self, sheet, rows: list[list[str]], max_retries: int, delay: int) -> None:
-        for attempt in range(max_retries):
-            try:
-                sheet.append_rows(rows, value_input_option="USER_ENTERED")
-                return
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    time.sleep(delay)
-                else:
-                    raise
+    def _append_rows(self, sheet, rows: list[list[str]], max_retries: int, delay: int, chunk_size: int = 500) -> None:
+        """Append rows in chunks to stay within the Sheets write-quota."""
+        for chunk_start in range(0, len(rows), chunk_size):
+            chunk = rows[chunk_start : chunk_start + chunk_size]
+            for attempt in range(max_retries):
+                try:
+                    sheet.append_rows(chunk, value_input_option="USER_ENTERED")
+                    break
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            "Append rows retry %s/%s: %s", attempt + 1, max_retries, e
+                        )
+                        time.sleep(delay)
+                    else:
+                        raise
+            # Brief pause between chunks.
+            if chunk_start + chunk_size < len(rows):
+                time.sleep(2)
     
     def _ensure_sheet_size(self, sheet, data_rows, data_cols, start_row, start_col, include_header):
         required_rows = start_row + data_rows - 1 + (1 if include_header else 0)
