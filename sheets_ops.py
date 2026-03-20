@@ -76,36 +76,23 @@ class SheetsClient:
             logger.exception("Worksheet not found: %s", e)
             return False
 
-        if df.empty:
-            self._sync_header(sheet, df.columns.tolist())
-            logger.info("No delta rows to upsert into Google Sheets")
-            return True
-
-        self._sync_header(sheet, df.columns.tolist())
-        existing_df = self._get_existing_data_with_rows(sheet)
-
-        if key_column not in existing_df.columns:
-            existing_df = pd.DataFrame(columns=df.columns.tolist() + ["__row_num__"])
-
         if key_column not in df.columns:
             raise KeyError(f"Missing key column for upsert: {key_column}")
 
         prepared_df = self._prepare_sheet_dataframe(df)
-        existing_lookup = {}
-        if not existing_df.empty:
-            for _, row in existing_df.iterrows():
-                existing_lookup[str(row[key_column])] = int(row["__row_num__"])
+        header, existing_df = self._get_existing_sheet_state(sheet)
 
-        rows_to_update = []
-        rows_to_append = []
-        for _, row in prepared_df.iterrows():
-            row_key = str(row[key_column])
-            row_values = row[df.columns.tolist()].tolist()
-            row_num = existing_lookup.get(row_key)
-            if row_num is None:
-                rows_to_append.append(row_values)
-            else:
-                rows_to_update.append((row_num, row_values))
+        if df.empty:
+            self._sync_header(sheet, df.columns.tolist(), current_header=header)
+            logger.info("No delta rows to upsert into Google Sheets")
+            return True
+
+        self._sync_header(sheet, df.columns.tolist(), current_header=header)
+        rows_to_update, rows_to_append = self._split_sheet_operations(
+            prepared_df,
+            existing_df,
+            key_column,
+        )
 
         required_rows = max(sheet.row_count, 1 + len(existing_df) + len(rows_to_append))
         required_cols = max(sheet.col_count, len(df.columns))
@@ -132,32 +119,58 @@ class SheetsClient:
         except (ValueError, gspread.WorksheetNotFound):
             return spreadsheet.worksheet(identifier)
 
-    def _sync_header(self, sheet, columns: list[str]) -> None:
-        header_values = [columns]
+    def _sync_header(self, sheet, columns: list[str], current_header: list[str] | None = None) -> None:
         required_cols = max(sheet.col_count, len(columns), 1)
         if sheet.col_count != required_cols:
             sheet.resize(rows=max(sheet.row_count, 1), cols=required_cols)
+        if current_header == columns:
+            return
         end_cell = rowcol_to_a1(1, len(columns))
-        sheet.update(f"A1:{end_cell}", header_values)
+        sheet.update(f"A1:{end_cell}", [columns])
 
-    def _get_existing_data_with_rows(self, sheet) -> pd.DataFrame:
+    def _get_existing_sheet_state(self, sheet) -> tuple[list[str], pd.DataFrame]:
         all_values = sheet.get_all_values()
         if not all_values:
-            return pd.DataFrame(columns=["__row_num__"])
+            return [], pd.DataFrame(columns=["__row_num__"])
 
         header = all_values[0]
         data = all_values[1:]
         if not data:
-            return pd.DataFrame(columns=header + ["__row_num__"])
+            return header, pd.DataFrame(columns=header + ["__row_num__"])
 
         df = pd.DataFrame(data, columns=header)
         df["__row_num__"] = pd.RangeIndex(2, 2 + len(df))
-        return df
+        return header, df
 
     def _prepare_sheet_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         prepared = df.copy()
         prepared = prepared.where(~prepared.isna(), "")
         return prepared.astype(str).reset_index(drop=True)
+
+    @staticmethod
+    def _split_sheet_operations(
+        prepared_df: pd.DataFrame,
+        existing_df: pd.DataFrame,
+        key_column: str,
+    ) -> tuple[list[tuple[int, list[str]]], list[list[str]]]:
+        if key_column not in existing_df.columns:
+            existing_df = pd.DataFrame(columns=prepared_df.columns.tolist() + ["__row_num__"])
+
+        indexed_existing = existing_df[[key_column, "__row_num__"]].copy()
+        indexed_existing[key_column] = indexed_existing[key_column].astype(str)
+
+        operation_df = prepared_df.merge(indexed_existing, on=key_column, how="left")
+        ordered_columns = prepared_df.columns.tolist()
+
+        rows_to_update = [
+            (int(row["__row_num__"]), row[ordered_columns].tolist())
+            for _, row in operation_df[operation_df["__row_num__"].notna()].iterrows()
+        ]
+        rows_to_append = [
+            row[ordered_columns].tolist()
+            for _, row in operation_df[operation_df["__row_num__"].isna()].iterrows()
+        ]
+        return rows_to_update, rows_to_append
 
     def _batch_update_rows(
         self,

@@ -185,7 +185,12 @@ class AppointmentPipelineTests(unittest.TestCase):
             }
         )
 
-        result = self.pipeline.process_appointments(sheet_df).sort_values("ID").reset_index(drop=True)
+        with patch.object(
+            self.pipeline,
+            "_get_extraction_bounds",
+            return_value=(pd.Timestamp("2024-01-01"), pd.Timestamp("2024-02-01")),
+        ):
+            result = self.pipeline.process_appointments(sheet_df).sort_values("ID").reset_index(drop=True)
 
         self.assertEqual(result["ID"].tolist(), ["1", "2"])
         self.assertEqual(result.loc[0, "Service"], "Consult")
@@ -196,6 +201,121 @@ class AppointmentPipelineTests(unittest.TestCase):
         self.assertEqual(result.loc[1, "Time"], 0)
         self.assertEqual(result.loc[1, "PatientCaseName"], "Selfpay")
         self.assertEqual(result.loc[1, "CaseNameID"], "999")
+
+    def test_process_appointments_only_returns_impacted_rows(self):
+        self.pipeline.appointment_df = pd.DataFrame(
+            {
+                "ID": ["1"],
+                "ConfirmationStatus": ["Confirmed"],
+                "CreatedDate": ["2024-01-01 08:00:00"],
+                "LastModifiedDate": ["2024-01-02 08:00:00"],
+                "ServiceLocationName": ["HQ"],
+                "PatientID": ["10"],
+                "PatientFullName": ["john doe"],
+                "PatientCaseID": ["500"],
+                "PatientCaseName": [None],
+                "PatientCasePayerScenario": ["Insurance"],
+                "StartDate": ["2024-01-03 09:00:00"],
+                "EndDate": ["2024-01-03 10:00:00"],
+                "AppointmentReason1": ["Consultation"],
+                "Provider": ["doctor who"],
+            }
+        )
+        sheet_df = pd.DataFrame(
+            {
+                "ID": ["1", "999"],
+                "ConfirmationStatus": ["Old", "Completed"],
+                "CreatedDate": ["2024-01-01 08:00:00", "2024-01-04 08:00:00"],
+                "LastModifiedDate": ["2024-01-02 08:00:00", "2024-01-05 08:00:00"],
+                "ServiceLocationName": ["HQ", "Branch"],
+                "PatientID": ["10", "11"],
+                "PatientFullName": ["John Doe", "Jane Roe"],
+                "PatientCaseID": ["500", "501"],
+                "PatientCaseName": ["", ""],
+                "PatientCasePayerScenario": ["Insurance", "Insurance"],
+                "StartDate": ["2024-01-03 09:00:00", "2024-06-06 11:00:00"],
+                "EndDate": ["2024-01-03 10:00:00", "2024-06-06 12:00:00"],
+                "AppointmentReason1": ["Consultation", "Follow Up"],
+                "Provider": ["Doctor Who", "Doctor Two"],
+                "Service": ["", "Legacy"],
+                "Done": [0, 1],
+                "StartOnlyDate": ["2024-01-03", "2024-06-06"],
+                "WeekDate": ["12/29-01/04/24", "06/05-06/11/24"],
+                "MonthDate": ["2024-01-01", "2024-06-01"],
+                "Month": [1, 6],
+                "Week": [1, 23],
+                "Time": [0.0, 1.0],
+                "CreationWeekDate": ["12/29-01/04/24", "05/31-06/06/24"],
+                "CaseNameID": ["100", "200"],
+            }
+        )
+
+        with patch.object(
+            self.pipeline,
+            "_get_extraction_bounds",
+            return_value=(pd.Timestamp("2024-01-01"), pd.Timestamp("2024-02-01")),
+        ):
+            result = self.pipeline.process_appointments(sheet_df)
+
+        self.assertEqual(set(result["ID"]), {"1"})
+
+    def test_process_appointments_marks_deleted_only_inside_extraction_window(self):
+        self.pipeline.appointment_df = pd.DataFrame(
+            {
+                "ID": ["1"],
+                "ConfirmationStatus": ["Confirmed"],
+                "CreatedDate": ["2024-01-01 08:00:00"],
+                "LastModifiedDate": ["2024-01-02 08:00:00"],
+                "ServiceLocationName": ["HQ"],
+                "PatientID": ["10"],
+                "PatientFullName": ["john doe"],
+                "PatientCaseID": ["500"],
+                "PatientCaseName": [None],
+                "PatientCasePayerScenario": ["Insurance"],
+                "StartDate": ["2024-01-03 09:00:00"],
+                "EndDate": ["2024-01-03 10:00:00"],
+                "AppointmentReason1": ["Consultation"],
+                "Provider": ["doctor who"],
+            }
+        )
+        sheet_df = pd.DataFrame(
+            {
+                "ID": ["2", "999"],
+                "ConfirmationStatus": ["Completed", "Completed"],
+                "CreatedDate": ["2024-01-01 08:00:00", "2024-01-04 08:00:00"],
+                "LastModifiedDate": ["2024-01-02 08:00:00", "2024-01-05 08:00:00"],
+                "ServiceLocationName": ["HQ", "Branch"],
+                "PatientID": ["11", "12"],
+                "PatientFullName": ["Jane Roe", "Other Roe"],
+                "PatientCaseID": ["501", "502"],
+                "PatientCaseName": ["", ""],
+                "PatientCasePayerScenario": ["Self", "Insurance"],
+                "StartDate": ["2024-01-10 09:00:00", "2024-06-06 11:00:00"],
+                "EndDate": ["2024-01-10 10:00:00", "2024-06-06 12:00:00"],
+                "AppointmentReason1": ["Follow Up", "Follow Up"],
+                "Provider": ["Doctor Two", "Doctor Three"],
+                "Service": ["Legacy", "Legacy"],
+                "Done": [1, 1],
+                "StartOnlyDate": ["2024-01-10", "2024-06-06"],
+                "WeekDate": ["01/05-01/11/24", "06/05-06/11/24"],
+                "MonthDate": ["2024-01-01", "2024-06-01"],
+                "Month": [1, 6],
+                "Week": [2, 23],
+                "Time": [1.0, 1.0],
+                "CreationWeekDate": ["12/29-01/04/24", "05/31-06/06/24"],
+                "CaseNameID": ["999", "200"],
+            }
+        )
+
+        with patch.object(
+            self.pipeline,
+            "_get_extraction_bounds",
+            return_value=(pd.Timestamp("2024-01-01"), pd.Timestamp("2024-02-01")),
+        ):
+            result = self.pipeline.process_appointments(sheet_df).sort_values("ID").reset_index(drop=True)
+
+        self.assertEqual(result["ID"].tolist(), ["1", "2"])
+        self.assertEqual(result.loc[1, "ConfirmationStatus"], "Deleted")
 
     def test_build_delta_appointments_returns_only_new_and_changed_rows(self):
         processed_df = pd.DataFrame(

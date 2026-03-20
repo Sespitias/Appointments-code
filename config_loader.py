@@ -47,7 +47,7 @@ class Config:
 
         self._config['pipeline'] = {
             'months_back': int(os.getenv('MONTHS_BACK', 1)),
-            'months_forward': int(os.getenv('MONTHS_FORWARD', 12)),
+            'months_forward': int(os.getenv('MONTHS_FORWARD', 2)),
             'fetch_interval_days': int(os.getenv('FETCH_INTERVAL_DAYS', 8)),
             'parallel_workers': int(os.getenv('PARALLEL_WORKERS', 10)),
             'async_upload': os.getenv('ASYNC_UPLOAD', 'true').lower() == 'true',

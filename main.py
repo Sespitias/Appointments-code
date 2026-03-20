@@ -49,6 +49,8 @@ GOOGLE_SCOPES = [
 ]
 
 EXPORT_APPOINTMENT_COLUMNS = BQ_COLUMNS.copy()
+IDENTIFIER_COLUMNS = ["ID", "PatientID", "PatientCaseID", "CaseNameID"]
+EXPORT_DATETIME_COLUMNS = ["StartDate", "EndDate", "CreatedDate", "LastModifiedDate"]
 
 
 class AppointmentPipeline:
@@ -215,32 +217,99 @@ class AppointmentPipeline:
     def process_appointments(self, sheet_appointments_df):
         logger.info("Processing appointments...")
 
+        transformed_df = self._prepare_tebra_appointments()
+        extraction_start, extraction_end = self._get_extraction_bounds()
+        relevant_sheet_df = self._filter_sheet_appointments_by_window(
+            sheet_appointments_df,
+            extraction_start,
+            extraction_end,
+        )
+        deleted_ids = find_appointments_not_in_tebra(transformed_df, relevant_sheet_df)
+        impacted_ids = self._build_impacted_ids(transformed_df, deleted_ids)
+        impacted_sheet_df = self._filter_sheet_appointments_by_ids(
+            sheet_appointments_df,
+            impacted_ids,
+        )
+        merged_df = self._merge_with_sheet_appointments(transformed_df, impacted_sheet_df)
+        export_df = self._build_appointment_import_df(merged_df, EXPORT_APPOINTMENT_COLUMNS)
+        export_df = self._finalize_export_appointments(export_df, deleted_ids)
+        return export_df
+
+    def _prepare_tebra_appointments(self) -> pd.DataFrame:
         df = self.appointment_df.copy()
         df = df.replace({r"´": "", None: ""}, regex=True)
         df = apply_all_transformations(df, self.master_df)
+        return df.replace("", None).dropna(subset=["ID"])
 
-        deleted_ids = find_appointments_not_in_tebra(df, sheet_appointments_df)
-        df = df.replace("", None).dropna(subset=["ID"])
-        df = df.merge(
-            sheet_appointments_df, on="ID", how="outer", suffixes=("_tebra", "_sheet")
+    def _get_extraction_bounds(self) -> tuple[pd.Timestamp, pd.Timestamp]:
+        pipeline_config = self.config.pipeline
+        now = pd.Timestamp.now()
+        start = now - pd.DateOffset(months=pipeline_config["months_back"])
+        end = now + pd.DateOffset(months=pipeline_config["months_forward"])
+        return start.normalize(), end.normalize()
+
+    @staticmethod
+    def _build_impacted_ids(tebra_df: pd.DataFrame, deleted_ids: list[str]) -> set[str]:
+        tebra_ids = set(tebra_df["ID"].dropna().astype(str))
+        return tebra_ids.union({str(appointment_id) for appointment_id in deleted_ids})
+
+    @staticmethod
+    def _filter_sheet_appointments_by_ids(
+        sheet_appointments_df: pd.DataFrame,
+        impacted_ids: set[str],
+    ) -> pd.DataFrame:
+        if sheet_appointments_df.empty or not impacted_ids:
+            return sheet_appointments_df.iloc[0:0].copy()
+
+        comparable_ids = sheet_appointments_df["ID"].astype(str)
+        return sheet_appointments_df.loc[comparable_ids.isin(impacted_ids)].copy()
+
+    @staticmethod
+    def _filter_sheet_appointments_by_window(
+        sheet_appointments_df: pd.DataFrame,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        date_column: str = "StartDate",
+    ) -> pd.DataFrame:
+        if sheet_appointments_df.empty or date_column not in sheet_appointments_df.columns:
+            return sheet_appointments_df.iloc[0:0].copy()
+
+        sheet_dates = pd.to_datetime(
+            sheet_appointments_df[date_column],
+            format="mixed",
+            errors="coerce",
+        )
+        mask = sheet_dates.between(start, end, inclusive="both")
+        return sheet_appointments_df.loc[mask].copy()
+
+    @staticmethod
+    def _merge_with_sheet_appointments(
+        tebra_df: pd.DataFrame, sheet_appointments_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        return tebra_df.merge(
+            sheet_appointments_df,
+            on="ID",
+            how="outer",
+            suffixes=("_tebra", "_sheet"),
         )
 
-        import_df = self._build_appointment_import_df(df, EXPORT_APPOINTMENT_COLUMNS)
-        import_df = import_df.dropna(subset=["ID"]).drop_duplicates(subset=["ID"], keep="last")
+    def _finalize_export_appointments(
+        self, import_df: pd.DataFrame, deleted_ids: list[str]
+    ) -> pd.DataFrame:
+        export_df = import_df.dropna(subset=["ID"]).drop_duplicates(subset=["ID"], keep="last")
 
-        for col in ["StartDate", "EndDate", "CreatedDate", "LastModifiedDate"]:
-            if col in import_df.columns:
-                import_df[col] = pd.to_datetime(import_df[col], format="mixed", errors="coerce")
+        for col in EXPORT_DATETIME_COLUMNS:
+            if col in export_df.columns:
+                export_df[col] = pd.to_datetime(export_df[col], format="mixed", errors="coerce")
 
-        import_df = apply_column_done(import_df, self.master_df)
-        import_df = apply_time_column(import_df)
-        import_df = mark_deleted_appointments(import_df, deleted_ids)
-        import_df = assign_patient_case_name(import_df, self.patient_df)
-        import_df = assign_case_name_id(import_df, self.insurance_df)
-        import_df = normalize_identifier_columns(import_df, ["ID", "PatientID", "PatientCaseID", "CaseNameID"])
-        import_df = format_datetime_columns(import_df)
-
-        return import_df
+        export_df = apply_column_done(export_df, self.master_df)
+        export_df = apply_time_column(export_df)
+        export_df = mark_deleted_appointments(export_df, deleted_ids)
+        export_df = assign_patient_case_name(export_df, self.patient_df)
+        export_df = assign_case_name_id(export_df, self.insurance_df)
+        export_df = normalize_identifier_columns(export_df, IDENTIFIER_COLUMNS)
+        export_df = format_datetime_columns(export_df)
+        return export_df
 
     @staticmethod
     def _normalize_for_delta(df: pd.DataFrame) -> pd.DataFrame:
@@ -252,39 +321,30 @@ class AppointmentPipeline:
         comparable = comparable.where(~comparable.isna(), "")
         return comparable.astype(str)
 
+    @staticmethod
+    def _build_row_hashes(df: pd.DataFrame) -> pd.DataFrame:
+        comparable = AppointmentPipeline._normalize_for_delta(df)
+        comparable["_hash"] = pd.util.hash_pandas_object(
+            comparable.drop(columns=["ID"]),
+            index=False,
+        )
+        return comparable[["ID", "_hash"]].drop_duplicates(subset=["ID"], keep="last")
+
     def build_delta_appointments(
         self, processed_df: pd.DataFrame, sheet_appointments_df: pd.DataFrame
     ) -> pd.DataFrame:
         if processed_df.empty:
             return processed_df.copy()
 
-        existing_df = sheet_appointments_df.copy()
-        for col in EXPORT_APPOINTMENT_COLUMNS:
-            if col not in existing_df.columns:
-                existing_df[col] = None
+        processed_hashes = self._build_row_hashes(processed_df)
+        existing_hashes = self._build_row_hashes(sheet_appointments_df)
 
-        processed_norm = self._normalize_for_delta(processed_df)   # str, no index yet
-        existing_norm = self._normalize_for_delta(existing_df)
-
-        # Hash every row into a single integer for fast comparison.
-        processed_norm["_hash"] = pd.util.hash_pandas_object(
-            processed_norm.drop(columns=["ID"]), index=False
-        )
-        existing_norm["_hash"] = pd.util.hash_pandas_object(
-            existing_norm.drop(columns=["ID"]), index=False
-        )
-
-        # Keep one row per ID (last wins, consistent with the rest of the pipeline).
-        processed_dedup = processed_norm.drop_duplicates(subset=["ID"], keep="last")
-        existing_dedup = existing_norm.drop_duplicates(subset=["ID"], keep="last")
-
-        merged = processed_dedup[["ID", "_hash"]].merge(
-            existing_dedup[["ID", "_hash"]].rename(columns={"_hash": "_hash_existing"}),
+        merged = processed_hashes.merge(
+            existing_hashes.rename(columns={"_hash": "_hash_existing"}),
             on="ID",
             how="left",
         )
 
-        # A row is in the delta when it is new (no match) or its hash changed.
         changed_mask = (
             merged["_hash_existing"].isna()
             | (merged["_hash"] != merged["_hash_existing"])
