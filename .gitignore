@@ -21,3 +21,4 @@ appointment_frecuently_new_modificada.py
 credentials.json
 credentials*.json
 service-account*.json
+cloudrun.env.yaml

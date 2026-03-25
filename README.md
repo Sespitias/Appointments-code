@@ -1,6 +1,7 @@
-# Appointment Pipeline - Cloud Run Deployment
+# Appointment Pipeline - Cloud Run Jobs Deployment
 
 Pipeline automatizado para extraer citas de Tebra, procesarlas y sincronizarlas con BigQuery y Google Sheets.
+El despliegue recomendado es como **Cloud Run Job** ejecutado por **Cloud Scheduler**.
 
 ## Estructura del Proyecto
 
@@ -15,9 +16,10 @@ Pipeline automatizado para extraer citas de Tebra, procesarlas y sincronizarlas 
 ├── config.yaml            # Configuración
 ├── requirements.txt       # Dependencias Python
 ├── Dockerfile             # Imagen Docker
-├── cloudbuild.yaml       # CI/CD con Cloud Build
-├── deploy.sh             # Script de despliegue
-├── setup.sh              # Script de configuración inicial
+├── cloudbuild.yaml       # Build + update de imagen del Cloud Run Job
+├── cloudrun.env.example.yaml # Plantilla de variables para el job
+├── deploy.sh             # Script de despliegue manual del job
+├── setup.sh              # Script de configuración inicial GCP
 └── .env.example          # Plantilla de variables de entorno
 ```
 
@@ -59,12 +61,17 @@ chmod +x setup.sh
 
 ## Despliegue
 
-### Opción 1: Manual
+### Opción 1: Bootstrap manual
 
 ```bash
+cp cloudrun.env.example.yaml cloudrun.env.yaml
 chmod +x deploy.sh
 ./deploy.sh your-project-id us-central1
 ```
+
+Esto crea o actualiza el job con su configuración completa.
+La plantilla `cloudrun.env.example.yaml` incluye las variables OAuth que hoy necesita
+la app en Cloud Run para autenticarse con Google Sheets y BigQuery.
 
 ### Opción 2: Automático con Cloud Build
 
@@ -72,18 +79,30 @@ chmod +x deploy.sh
 gcloud builds submit --config=cloudbuild.yaml .
 ```
 
+Esta opción está pensada para **actualizar la imagen** de un job que ya existe.
+No redefine variables ni secretos del runtime.
+
+### Windows PowerShell
+
+```powershell
+Copy-Item cloudrun.env.example.yaml cloudrun.env.yaml
+.\setup.ps1 -ProjectId "your-project-id" -Region "us-central1"
+.\deploy.ps1 -ProjectId "your-project-id" -Region "us-central1"
+```
+
 ## Programación (Cloud Scheduler)
 
-El pipeline se ejecuta automáticamente todos los días a las 6:00 AM:
+El pipeline debe ejecutarse mediante Cloud Scheduler llamando al endpoint `jobs.run`
+de Cloud Run Jobs. El script `deploy.sh` ya crea o actualiza ese scheduler.
 
 ```bash
-# Ver jobs programados
+# Ver jobs de scheduler
 gcloud scheduler jobs list --location=us-central1
 
-# Ejecutar manualmente
-gcloud run invoke appointment-pipeline \
-    --region=us-central1 \
-    --project=your-project-id
+# Ejecutar manualmente el job
+gcloud run jobs execute appointment-pipeline \
+  --region=us-central1 \
+  --project=your-project-id
 ```
 
 ## Variables de Entorno
@@ -95,6 +114,9 @@ gcloud run invoke appointment-pipeline \
 | `TEBRA_USER` | Usuario de Tebra | Sí |
 | `TEBRA_PASSWORD` | Contraseña de Tebra | Sí |
 | `TEBRA_CUSTOMER_KEY` | Customer Key de Tebra | Sí |
+| `CLIENT_ID` | OAuth Client ID de Google | Sí en Cloud Run |
+| `CLIENT_SECRET` | OAuth Client Secret de Google | Sí en Cloud Run |
+| `REFRESH_TOKEN` | Refresh token con scopes de Sheets/Drive/BigQuery | Sí en Cloud Run |
 | `SHEET_KEY` | ID de Google Sheet principal | Sí |
 | `PATIENT_SHEET_KEY` | ID de Google Sheet de pacientes | Sí |
 | `INSURANCE_SHEET_KEY` | ID de Google Sheet de seguros | Sí |
@@ -117,11 +139,11 @@ python main.py
 ## Logs
 
 ```bash
-# Ver logs de Cloud Run
-gcloud logs read "resource.type=cloud_run_revision" --region=us-central1
+# Ver logs del job
+gcloud logs read "resource.type=cloud_run_job" --project=your-project-id
 
 # Ver logs en tiempo real
-gcloud logs read "resource.type=cloud_run_revision" --region=us-central1 --follow
+gcloud logs read "resource.type=cloud_run_job" --project=your-project-id --follow
 ```
 
 ## Permisos Requeridos
@@ -136,8 +158,8 @@ gcloud logs read "resource.type=cloud_run_revision" --region=us-central1 --follo
 ### Error de autenticación con Google Sheets
 Asegúrate de que el service account tenga acceso a las hojas de cálculo.
 
-### Timeout en Cloud Run
-Aumenta el timeout en cloudbuild.yaml o el parámetro `--timeout` en deploy.sh.
+### Timeout en Cloud Run Jobs
+Aumenta el timeout en `cloudbuild.yaml` o el parámetro `--timeout` en `deploy.sh`.
 
 ### Error de permisos BigQuery
 Verifica que el service account tenga los roles necesarios.

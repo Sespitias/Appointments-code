@@ -35,8 +35,8 @@ class Config:
         self._config['bigquery'] = {
             'project_id': os.getenv('GCP_PROJECT_ID'),
             'dataset_id': os.getenv('BQ_DATASET_ID'),
-            'source_table': os.getenv('BQ_SOURCE_TABLE', 'appointment_update_copy'),
-            'target_table': os.getenv('BQ_TARGET_TABLE', 'appointment_prod_copy')
+            'source_table': os.getenv('BQ_SOURCE_TABLE', 'appointment_update'),
+            'target_table': os.getenv('BQ_TARGET_TABLE', 'appointment_prod')
         }
 
         self._config['google_sheets'] = {

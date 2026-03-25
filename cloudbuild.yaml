@@ -9,31 +9,19 @@ steps:
     entrypoint: 'gcloud'
     args:
       - 'run'
-      - 'deploy'
+      - 'jobs'
+      - 'update'
       - 'appointment-pipeline'
-      - '--image'
-      - 'gcr.io/$PROJECT_ID/appointment-pipeline:$COMMIT_SHA'
       - '--region'
       - '${_REGION}'
-      - '--platform'
-      - 'managed'
-      - '--service-account'
-      - '${_SERVICE_ACCOUNT}'
-      - '--memory'
-      - '2Gi'
-      - '--cpu'
-      - '2'
-      - '--timeout'
-      - '3600'
-      - '--set-env-vars'
-      - 'GCP_PROJECT_ID=$PROJECT_ID'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/appointment-pipeline:$COMMIT_SHA'
 
 images:
   - 'gcr.io/$PROJECT_ID/appointment-pipeline:$COMMIT_SHA'
 
 substitutions:
   _REGION: 'us-central1'
-  _SERVICE_ACCOUNT: 'appointment-pipeline@$PROJECT_ID.iam.gserviceaccount.com'
 
 options:
   logging: CLOUD_LOGGING_ONLY

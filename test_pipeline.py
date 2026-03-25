@@ -36,8 +36,8 @@ class AppointmentPipelineTests(unittest.TestCase):
             bigquery={
                 "project_id": "weekly-revenue-integration",
                 "dataset_id": "Telemind_BD",
-                "source_table": "appointment_update_copy",
-                "target_table": "appointment_prod_copy",
+                "source_table": "appointment_update",
+                "target_table": "appointment_prod",
             },
             google_sheets={
                 "sheet_key": "sheet",

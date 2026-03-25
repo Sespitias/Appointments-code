@@ -7,8 +7,8 @@ tebra:
 bigquery:
   project_id: "${GCP_PROJECT_ID}"
   dataset_id: "${BQ_DATASET_ID}"
-  source_table: "appointment_update_copy"
-  target_table: "appointment_prod_copy"
+  source_table: "appointment_update"
+  target_table: "appointment_prod"
 
 google_sheets:
   sheet_key: "${SHEET_KEY}"
@@ -17,7 +17,7 @@ google_sheets:
 
 pipeline:
   months_back: 1
-  months_forward: 12
+  months_forward: 2
   fetch_interval_days: 8
   parallel_workers: 10
   async_upload: true
@@ -25,4 +25,4 @@ pipeline:
 
 execution:
   type: 2  # 0: normal, 1: recurrente, 2: ambas
-  days_back_filter: 10
+  days_back_filter: 30

@@ -208,14 +208,14 @@ def apply_column_creation_week_date(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def apply_column_month_date(df: pd.DataFrame) -> pd.DataFrame:
-    """Derive MonthDate as the first day of the month in YYYY-MM-DD format.
+    """Derive MonthDate as MM/YY from StartDate.
 
     BigQuery stores this column as STRING, so we produce a formatted string
     rather than a Timestamp to avoid type-mismatch errors on upload.
     """
     if "StartDate" in df.columns:
         start = pd.to_datetime(df["StartDate"], errors="coerce")
-        df["MonthDate"] = start.dt.to_period("M").dt.to_timestamp().dt.strftime("%Y-%m-%d")
+        df["MonthDate"] = start.dt.strftime("%m/%y")
     return df
 
 
@@ -437,10 +437,13 @@ def format_datetime_columns(
     fmt: str = "%m/%d/%Y %H:%M:%S",
 ) -> pd.DataFrame:
     if columns is None:
-        columns = ["StartDate", "EndDate", "CreatedDate", "LastModifiedDate"]
+        columns = ["StartDate", "EndDate", "CreatedDate", "LastModifiedDate", "StartOnlyDate"]
     for col in columns:
         if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime(fmt)
+            if col == "StartOnlyDate":
+                df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%m/%d/%Y")
+            else:
+                df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime(fmt)
     return df
 
 
