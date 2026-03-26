@@ -23,6 +23,7 @@ from transformations import (
     apply_time_column,
     assign_patient_case_name,
     format_column_date,
+    normalize_confirmation_status,
     normalize_identifier_columns,
     trim_string_columns,
     validate_output_schema,
@@ -519,6 +520,25 @@ class TransformationTests(unittest.TestCase):
 
         self.assertEqual(result["PatientID"].tolist(), ["15011", "21369", None])
         self.assertEqual(result["CaseNameID"].tolist(), ["100", "200", None])
+
+    def test_normalize_confirmation_status_handles_hyphenated_values(self):
+        df = pd.DataFrame(
+            {
+                "ConfirmationStatus": [
+                    "check-out",
+                    "CHECK-IN",
+                    "no-show",
+                    " scheduled ",
+                ]
+            }
+        )
+
+        result = normalize_confirmation_status(df)
+
+        self.assertEqual(
+            result["ConfirmationStatus"].tolist(),
+            ["Check-Out", "Check-In", "No-Show", "Scheduled"],
+        )
 
     # --- WeekDate (Friday-to-Thursday) tests ---
 

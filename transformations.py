@@ -46,6 +46,7 @@ def capitalize_string_columns(
         columns = [
             "PatientFullName",
             "PatientCaseName",
+            "ConfirmationStatus",
             "AppointmentReason1",
             "Provider",
             "Service",
@@ -54,6 +55,23 @@ def capitalize_string_columns(
     for col in columns:
         if col in df.columns:
             df[col] = df[col].astype(str).str.title()
+    return df
+
+
+def normalize_confirmation_status(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize ConfirmationStatus to title case, preserving hyphenated words."""
+    if "ConfirmationStatus" not in df.columns:
+        return df
+
+    df = df.copy()
+    normalized = (
+        df["ConfirmationStatus"]
+        .astype("string")
+        .str.strip()
+        .str.replace(r"\s*-\s*", "-", regex=True)
+        .str.title()
+    )
+    df["ConfirmationStatus"] = normalized.where(normalized.notna(), None)
     return df
 
 
@@ -461,21 +479,23 @@ def apply_all_transformations(
     Execution order:
     1.  clean_dataframe          — remove special chars / NaN→None
     2.  trim_string_columns      — strip whitespace
-    3.  capitalize_string_columns
-    4.  format_column_date       — parse ALL datetimes + derive StartOnlyDate
-    5.  apply_column_service     — map Service from master
-    6.  apply_column_done        — map Done with local+master catalog
-    7.  apply_column_month       — derive Month from StartDate
-    8.  apply_column_week_date   — derive WeekDate (Fri-Thu)
-    9.  apply_column_creation_week_date — derive CreationWeekDate from CreatedDate
-    10. apply_column_month_date  — derive MonthDate (1st of month)
-    11. apply_column_week        — derive Week (ISO, preserved)
-    12. apply_time_column        — derive Time (duration * Done)
-    13. drop duplicates
-    14. validate_output_schema   — log violations
+    3.  normalize_confirmation_status
+    4.  capitalize_string_columns
+    5.  format_column_date       — parse ALL datetimes + derive StartOnlyDate
+    6.  apply_column_service     — map Service from master
+    7.  apply_column_done        — map Done with local+master catalog
+    8.  apply_column_month       — derive Month from StartDate
+    9.  apply_column_week_date   — derive WeekDate (Fri-Thu)
+    10. apply_column_creation_week_date — derive CreationWeekDate from CreatedDate
+    11. apply_column_month_date  — derive MonthDate (1st of month)
+    12. apply_column_week        — derive Week (ISO, preserved)
+    13. apply_time_column        — derive Time (duration * Done)
+    14. drop duplicates
+    15. validate_output_schema   — log violations
     """
     df = clean_dataframe(df)
     df = trim_string_columns(df)
+    df = normalize_confirmation_status(df)
     df = capitalize_string_columns(df)
     df = format_column_date(df)
     df = apply_column_service(df, master_df)
