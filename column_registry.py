@@ -71,6 +71,21 @@ APPOINTMENT_REASON_SERVICE_MAP: dict[str, str] = {
 }
 
 
+_MISSING_TEXT = {"", "nan", "none"}
+
+
+def is_missing_text(value) -> bool:
+    """True for None, NaN, or text that is blank / "nan" / "none" (any case)."""
+    if value is None:
+        return True
+    try:
+        if value != value:  # NaN
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip().casefold() in _MISSING_TEXT
+
+
 def normalize_reason_key(value) -> str | None:
     """Normalize an appointment reason for matching (trim + casefold).
 
@@ -109,7 +124,7 @@ def build_service_map(master_df=None) -> dict[str, str]:
                 master_df["AppointmentReason1"], master_df["Service"]
             ):
                 key = normalize_reason_key(reason)
-                if key is not None:
+                if key is not None and not is_missing_text(service):
                     merged[key] = service
         else:
             logger.warning(

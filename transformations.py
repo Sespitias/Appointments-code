@@ -12,6 +12,7 @@ from column_registry import (
     TRIM_COLUMNS,
     build_done_map,
     build_service_map,
+    is_missing_text,
     normalize_reason_key,
 )
 
@@ -125,7 +126,7 @@ def apply_column_service(
         else pd.Series(index=df.index, dtype="object")
     )
     existing_service = existing_service.where(
-        ~existing_service.astype(str).str.strip().isin(["nan", "None", ""]),
+        ~existing_service.map(is_missing_text).astype(bool),
         None,
     )
     mapped_service = (

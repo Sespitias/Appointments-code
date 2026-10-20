@@ -542,6 +542,21 @@ class TransformationTests(unittest.TestCase):
             apply_column_service(df, master_df)
         self.assertIn("First Office Visit Nevada", "".join(logs.output))
 
+    def test_apply_column_service_blank_master_service_does_not_override_local(self):
+        df = pd.DataFrame({"AppointmentReason1": ["Mindmetrix"]})
+        for blank in ["", "nan", "None", " NaN ", None, float("nan")]:
+            master_df = pd.DataFrame({"AppointmentReason1": ["Mindmetrix"], "Service": [blank]})
+            result = apply_column_service(df.copy(), master_df)
+            self.assertEqual(result.loc[0, "Service"], "Cognitive", f"blank={blank!r}")
+
+    def test_apply_column_service_missing_service_check_is_case_insensitive(self):
+        df = pd.DataFrame(
+            {"AppointmentReason1": ["Unknown", "Unknown"], "Service": ["Nan", "NONE"]}
+        )
+        master_df = pd.DataFrame({"AppointmentReason1": ["Known"], "Service": ["Mapped"]})
+        result = apply_column_service(df, master_df)
+        self.assertTrue(result["Service"].isna().all())
+
     def test_normalize_identifier_columns_removes_decimal_suffix(self):
         df = pd.DataFrame(
             {
