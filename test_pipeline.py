@@ -9,6 +9,7 @@ from google.api_core.exceptions import Forbidden, NotFound
 
 from bigquery_ops import (
     BQ_COLUMNS,
+    convert_columns,
     filter_recent_appointments,
     load_to_bigquery,
     validate_bigquery_destination,
@@ -723,6 +724,16 @@ class BigQueryOpsTests(unittest.TestCase):
         )
 
         self.assertEqual(mock_to_gbq.call_args.kwargs["credentials"], credentials)
+
+    def test_convert_columns_writes_null_instead_of_nan_string(self):
+        df = pd.DataFrame({"Service": [float("nan"), None, "nan", "Cognitive"]})
+        result = convert_columns(df)
+        self.assertEqual(result["Service"].tolist(), [None, None, None, "Cognitive"])
+
+    def test_convert_columns_keeps_ids_as_strings(self):
+        df = pd.DataFrame({"ID": [123, "456"]})
+        result = convert_columns(df)
+        self.assertEqual(result["ID"].tolist(), ["123", "456"])
 
     def test_validate_bigquery_destination_reports_missing_table(self):
         client = MagicMock()

@@ -35,31 +35,51 @@ BQ_COLUMNS = [
     "CaseNameID",
 ]
 
+_MISSING_STRINGS = {"nan", "none", "nat", ""}
+
+
+def to_nullable_str(series: pd.Series) -> pd.Series:
+    """Convert to str, keeping missing values as None (BigQuery NULL).
+
+    None/NaN and the literal strings "nan", "None", "NaT" and "" (after
+    stripping) become None; everything else becomes ``str(value)``.
+    """
+    def _convert(value):
+        if value is None or pd.isna(value):
+            return None
+        text = str(value)
+        if text.strip().casefold() in _MISSING_STRINGS:
+            return None
+        return text
+
+    return series.map(_convert).astype(object)
+
+
 CONVERSION_MAPPING = {
-    "ID": str,
-    "ConfirmationStatus": str,
+    "ID": to_nullable_str,
+    "ConfirmationStatus": to_nullable_str,
     "CreatedDate": lambda x: pd.to_datetime(x, errors="coerce", utc=True),
     "LastModifiedDate": lambda x: pd.to_datetime(x, errors="coerce", utc=True),
-    "ServiceLocationName": str,
-    "PatientID": str,
-    "PatientFullName": str,
-    "PatientCaseID": str,
-    "PatientCaseName": str,
-    "PatientCasePayerScenario": str,
+    "ServiceLocationName": to_nullable_str,
+    "PatientID": to_nullable_str,
+    "PatientFullName": to_nullable_str,
+    "PatientCaseID": to_nullable_str,
+    "PatientCaseName": to_nullable_str,
+    "PatientCasePayerScenario": to_nullable_str,
     "StartDate": lambda x: pd.to_datetime(x, errors="coerce", utc=True),
     "EndDate": lambda x: pd.to_datetime(x, errors="coerce", utc=True),
-    "AppointmentReason1": str,
-    "Provider": str,
-    "Service": str,
+    "AppointmentReason1": to_nullable_str,
+    "Provider": to_nullable_str,
+    "Service": to_nullable_str,
     "Done": lambda x: pd.to_numeric(x, errors="coerce", downcast="integer"),
     "StartOnlyDate": lambda x: pd.to_datetime(x, errors="coerce").dt.date,
-    "WeekDate": str,
-    "MonthDate": str,
+    "WeekDate": to_nullable_str,
+    "MonthDate": to_nullable_str,
     "Month": lambda x: pd.to_numeric(x, errors="coerce", downcast="integer"),
     "Week": lambda x: pd.to_numeric(x, errors="coerce", downcast="integer"),
     "Time": lambda x: pd.to_numeric(x, errors="coerce"),
-    "CreationWeekDate": str,
-    "CaseNameID": str,
+    "CreationWeekDate": to_nullable_str,
+    "CaseNameID": to_nullable_str,
 }
 
 logger = logging.getLogger(__name__)
