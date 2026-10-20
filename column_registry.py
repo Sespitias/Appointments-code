@@ -62,6 +62,65 @@ def build_done_map(master_df=None) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
+# AppointmentReason1 → Service mapping (local fallback catalog)
+# ---------------------------------------------------------------------------
+# Minimum guaranteed mapping. The master sheet can override or extend this.
+APPOINTMENT_REASON_SERVICE_MAP: dict[str, str] = {
+    "Mindmetrix": "Cognitive",
+    "Mindmetrix Retake": "Cognitive",
+}
+
+
+def normalize_reason_key(value) -> str | None:
+    """Normalize an appointment reason for matching (trim + casefold).
+
+    Returns ``None`` for ``None``, NaN, or blank values.
+    """
+    if value is None:
+        return None
+    try:
+        if value != value:  # NaN
+            return None
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip().casefold()
+    return text or None
+
+
+def build_service_map(master_df=None) -> dict[str, str]:
+    """
+    Build the consolidated AppointmentReason1 → Service dictionary.
+
+    Keys are normalized with :func:`normalize_reason_key`.
+    Priority: master_df values override the local catalog.
+
+    Parameters
+    ----------
+    master_df : pd.DataFrame | None
+        DataFrame with columns ``AppointmentReason1`` and ``Service``.
+    """
+    merged: dict[str, str] = {}
+    for reason, service in APPOINTMENT_REASON_SERVICE_MAP.items():
+        merged[normalize_reason_key(reason)] = service
+
+    if master_df is not None:
+        if {"AppointmentReason1", "Service"}.issubset(master_df.columns):
+            for reason, service in zip(
+                master_df["AppointmentReason1"], master_df["Service"]
+            ):
+                key = normalize_reason_key(reason)
+                if key is not None:
+                    merged[key] = service
+        else:
+            logger.warning(
+                "master_df missing AppointmentReason1/Service columns; "
+                "using local catalog only"
+            )
+
+    return merged
+
+
+# ---------------------------------------------------------------------------
 # String columns that need trimming
 # ---------------------------------------------------------------------------
 TRIM_COLUMNS: list[str] = [

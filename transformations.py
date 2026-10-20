@@ -11,6 +11,8 @@ from column_registry import (
     DATETIME_COLUMNS,
     TRIM_COLUMNS,
     build_done_map,
+    build_service_map,
+    normalize_reason_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,14 +110,35 @@ def format_column_date(df: pd.DataFrame) -> pd.DataFrame:
 def apply_column_service(
     df: pd.DataFrame, master_df: pd.DataFrame
 ) -> pd.DataFrame:
-    service_map = dict(zip(master_df["AppointmentReason1"], master_df["Service"]))
+    """
+    Map ``AppointmentReason1`` to ``Service``.
+
+    Uses the local fallback catalog merged with the master sheet (master
+    wins), matching reasons case-insensitively.  Existing ``Service`` values
+    of ``"nan"``, ``"None"`` or ``""`` are treated as missing.  Reasons that
+    remain unmapped are logged as warnings.
+    """
+    service_map = build_service_map(master_df)
     existing_service = (
         df["Service"]
         if "Service" in df.columns
         else pd.Series(index=df.index, dtype="object")
     )
-    mapped_service = df["AppointmentReason1"].map(service_map)
+    existing_service = existing_service.where(
+        ~existing_service.astype(str).str.strip().isin(["nan", "None", ""]),
+        None,
+    )
+    mapped_service = (
+        df["AppointmentReason1"].map(normalize_reason_key).map(service_map)
+    )
     df["Service"] = mapped_service.fillna(existing_service)
+
+    unmapped = df.loc[df["Service"].isna(), "AppointmentReason1"].dropna().unique()
+    if len(unmapped) > 0:
+        logger.warning(
+            "AppointmentReason1 values not in Service catalog: %s",
+            sorted(str(v) for v in unmapped),
+        )
     return df
 
 

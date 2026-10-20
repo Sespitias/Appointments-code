@@ -508,6 +508,39 @@ class TransformationTests(unittest.TestCase):
 
         self.assertEqual(result["Service"].tolist(), ["Mapped", "Keep Me"])
 
+    def test_apply_column_service_maps_mindmetrix_to_cognitive(self):
+        df = pd.DataFrame({"AppointmentReason1": ["Mindmetrix", "Mindmetrix Retake"]})
+        master_df = pd.DataFrame({"AppointmentReason1": ["Cognitive Test"], "Service": ["Cognitive"]})
+        result = apply_column_service(df, master_df)
+        self.assertEqual(result["Service"].tolist(), ["Cognitive", "Cognitive"])
+
+    def test_apply_column_service_matches_reason_case_insensitively(self):
+        df = pd.DataFrame({"AppointmentReason1": ["MindMetrix", " MINDMETRIX RETAKE ", "tms clearance"]})
+        master_df = pd.DataFrame({"AppointmentReason1": ["Tms Clearance"], "Service": ["Follow up"]})
+        result = apply_column_service(df, master_df)
+        self.assertEqual(result["Service"].tolist(), ["Cognitive", "Cognitive", "Follow up"])
+
+    def test_apply_column_service_master_overrides_local_catalog(self):
+        df = pd.DataFrame({"AppointmentReason1": ["Mindmetrix"]})
+        master_df = pd.DataFrame({"AppointmentReason1": ["Mindmetrix"], "Service": ["Neuro"]})
+        result = apply_column_service(df, master_df)
+        self.assertEqual(result.loc[0, "Service"], "Neuro")
+
+    def test_apply_column_service_treats_nan_string_service_as_missing(self):
+        df = pd.DataFrame(
+            {"AppointmentReason1": ["Unknown", "Unknown", "Unknown"], "Service": ["nan", "None", ""]}
+        )
+        master_df = pd.DataFrame({"AppointmentReason1": ["Known"], "Service": ["Mapped"]})
+        result = apply_column_service(df, master_df)
+        self.assertTrue(result["Service"].isna().all())
+
+    def test_apply_column_service_logs_unmapped_reasons(self):
+        df = pd.DataFrame({"AppointmentReason1": ["First Office Visit Nevada"]})
+        master_df = pd.DataFrame({"AppointmentReason1": ["Known"], "Service": ["Mapped"]})
+        with self.assertLogs("transformations", level="WARNING") as logs:
+            apply_column_service(df, master_df)
+        self.assertIn("First Office Visit Nevada", "".join(logs.output))
+
     def test_normalize_identifier_columns_removes_decimal_suffix(self):
         df = pd.DataFrame(
             {
