@@ -61,6 +61,24 @@ def build_done_map(master_df=None) -> dict[str, int]:
     return merged
 
 
+def resolve_service(reason, service_map: dict[str, str]) -> str | None:
+    """
+    Resolve the Service for an appointment reason.
+
+    Tries an exact lookup in ``service_map`` first, then falls back to
+    :data:`SERVICE_PREFIX_RULES`. Returns ``None`` when nothing matches.
+    """
+    key = normalize_reason_key(reason)
+    if key is None:
+        return None
+    if key in service_map:
+        return service_map[key]
+    for prefix, service in SERVICE_PREFIX_RULES:
+        if key.startswith(prefix):
+            return service
+    return None
+
+
 # ---------------------------------------------------------------------------
 # AppointmentReason1 → Service mapping (local fallback catalog)
 # ---------------------------------------------------------------------------
@@ -68,7 +86,20 @@ def build_done_map(master_df=None) -> dict[str, int]:
 APPOINTMENT_REASON_SERVICE_MAP: dict[str, str] = {
     "Mindmetrix": "Cognitive",
     "Mindmetrix Retake": "Cognitive",
+    "Followup Televisit Rt": "Follow up",
+    "First Office Visit Nevada": "First Office",
+    "First Office Visit Texas": "First Office",
+    "First Office Visit New Mexico": "First Office",
 }
+
+# Fallback for reasons without an exact mapping (e.g. a new state such as
+# "First Office Visit Arizona"). Prefixes are already normalized keys; the
+# first matching rule wins. Exact matches (catalog / master) always take
+# precedence over these rules.
+SERVICE_PREFIX_RULES: tuple[tuple[str, str], ...] = (
+    ("first office", "First Office"),
+    ("followup televisit", "Follow up"),
+)
 
 
 _MISSING_TEXT = {"", "nan", "none"}

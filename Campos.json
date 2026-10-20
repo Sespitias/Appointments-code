@@ -201,7 +201,8 @@
       "rules": [
         "Conservar como texto categórico.",
         "Aplicar trim.",
-        "Mindmetrix reasons map to Cognitive via local fallback catalog."
+        "Mindmetrix reasons map to Cognitive via local fallback catalog.",
+        "Reasons starting with 'First Office' map to First Office and 'Followup Televisit' to Follow up when no exact mapping exists."
       ],
       "derived": false,
       "source_columns": []

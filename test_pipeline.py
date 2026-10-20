@@ -536,11 +536,11 @@ class TransformationTests(unittest.TestCase):
         self.assertTrue(result["Service"].isna().all())
 
     def test_apply_column_service_logs_unmapped_reasons(self):
-        df = pd.DataFrame({"AppointmentReason1": ["First Office Visit Nevada"]})
+        df = pd.DataFrame({"AppointmentReason1": ["Unmapped Therapy Reason"]})
         master_df = pd.DataFrame({"AppointmentReason1": ["Known"], "Service": ["Mapped"]})
         with self.assertLogs("transformations", level="WARNING") as logs:
             apply_column_service(df, master_df)
-        self.assertIn("First Office Visit Nevada", "".join(logs.output))
+        self.assertIn("Unmapped Therapy Reason", "".join(logs.output))
 
     def test_apply_column_service_blank_master_service_does_not_override_local(self):
         df = pd.DataFrame({"AppointmentReason1": ["Mindmetrix"]})
@@ -554,6 +554,33 @@ class TransformationTests(unittest.TestCase):
             {"AppointmentReason1": ["Unknown", "Unknown"], "Service": ["Nan", "NONE"]}
         )
         master_df = pd.DataFrame({"AppointmentReason1": ["Known"], "Service": ["Mapped"]})
+        result = apply_column_service(df, master_df)
+        self.assertTrue(result["Service"].isna().all())
+
+    def test_apply_column_service_maps_new_first_office_states(self):
+        reasons = ["First Office Visit Nevada", "First Office Visit Texas",
+                   "First Office Visit New Mexico", "First Office Visit Arizona",
+                   " FIRST OFFICE VISIT NEVADA ", "First Office Visit, Followup Televisit"]
+        df = pd.DataFrame({"AppointmentReason1": reasons})
+        master_df = pd.DataFrame({"AppointmentReason1": ["Followup Televisit"], "Service": ["Follow up"]})
+        result = apply_column_service(df, master_df)
+        self.assertEqual(result["Service"].tolist(), ["First Office"] * 6)
+
+    def test_apply_column_service_maps_followup_televisit_rt(self):
+        df = pd.DataFrame({"AppointmentReason1": ["Followup Televisit Rt", "followup televisit rt"]})
+        master_df = pd.DataFrame({"AppointmentReason1": ["Known"], "Service": ["Mapped"]})
+        result = apply_column_service(df, master_df)
+        self.assertEqual(result["Service"].tolist(), ["Follow up", "Follow up"])
+
+    def test_apply_column_service_master_beats_prefix_rule(self):
+        df = pd.DataFrame({"AppointmentReason1": ["First Office Visit Utah"]})
+        master_df = pd.DataFrame({"AppointmentReason1": ["First Office Visit Utah"], "Service": ["Special"]})
+        result = apply_column_service(df, master_df)
+        self.assertEqual(result.loc[0, "Service"], "Special")
+
+    def test_apply_column_service_prefix_rules_skip_unrelated_reasons(self):
+        df = pd.DataFrame({"AppointmentReason1": ["Meeting", "Therapy Session", "Office Closed"]})
+        master_df = pd.DataFrame({"AppointmentReason1": ["Meeting"], "Service": [""]})
         result = apply_column_service(df, master_df)
         self.assertTrue(result["Service"].isna().all())
 

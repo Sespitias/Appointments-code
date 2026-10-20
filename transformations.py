@@ -13,7 +13,7 @@ from column_registry import (
     build_done_map,
     build_service_map,
     is_missing_text,
-    normalize_reason_key,
+    resolve_service,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,7 +115,8 @@ def apply_column_service(
     Map ``AppointmentReason1`` to ``Service``.
 
     Uses the local fallback catalog merged with the master sheet (master
-    wins), matching reasons case-insensitively.  Existing ``Service`` values
+    wins), matching reasons case-insensitively.  Reasons without an exact
+    mapping fall back to prefix rules (see ``SERVICE_PREFIX_RULES``).  Existing ``Service`` values
     of ``"nan"``, ``"None"`` or ``""`` are treated as missing.  Reasons that
     remain unmapped are logged as warnings.
     """
@@ -129,8 +130,8 @@ def apply_column_service(
         ~existing_service.map(is_missing_text).astype(bool),
         None,
     )
-    mapped_service = (
-        df["AppointmentReason1"].map(normalize_reason_key).map(service_map)
+    mapped_service = df["AppointmentReason1"].map(
+        lambda reason: resolve_service(reason, service_map)
     )
     df["Service"] = mapped_service.fillna(existing_service)
 
